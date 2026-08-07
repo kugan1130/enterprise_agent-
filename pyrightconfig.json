@@ -1,0 +1,12 @@
+{
+  "include": [
+    "main.py",
+    "backend"
+  ],
+  "venvPath": ".",
+  "venv": ".venv",
+  "extraPaths": [
+    "."
+  ],
+  "reportMissingImports": "error"
+}

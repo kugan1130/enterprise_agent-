@@ -1,9 +1,9 @@
 from collections.abc import AsyncIterator
 
-from app.llm.base import BaseLLM
+from backend.app.llm.base import BaseLLM
 
 
-class LLMClient:
+class LLMClient(BaseLLM):
 
     def __init__(self, provider: BaseLLM) -> None:
         self._provider = provider

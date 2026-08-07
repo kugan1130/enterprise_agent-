@@ -3,7 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
-from services.chat_service import ChatService
+from backend.services.chat_service import ChatService
 
 
 router = APIRouter(prefix="/api", tags=["chat"])

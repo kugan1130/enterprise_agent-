@@ -1,4 +1,4 @@
-from app.llm.base import BaseLLM
+from backend.app.llm.base import BaseLLM
 
 
 class ChatService:

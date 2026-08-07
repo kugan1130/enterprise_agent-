@@ -1,18 +1,10 @@
-import sys
-from pathlib import Path
-
-# Ensure backend directory is in sys.path so modules like `app` and `services` can be imported
-backend_dir = Path(__file__).resolve().parent / "backend"
-if str(backend_dir) not in sys.path:
-    sys.path.insert(0, str(backend_dir))
-
 from fastapi import FastAPI
 
-from app.api.chat import router as chat_router
-from app.core.config import settings
-from app.llm.groq_provider import GroqProvider
-from app.llm.llm_client import LLMClient
-from services.chat_service import ChatService
+from backend.app.api.chat import router as chat_router
+from backend.app.core.config import settings
+from backend.app.llm.llm_client import LLMClient
+from backend.app.llm.groq_provider import GroqProvider
+from backend.services.chat_service import ChatService
 
 
 def create_app() -> FastAPI:
@@ -21,11 +13,13 @@ def create_app() -> FastAPI:
         debug=settings.DEBUG,
     )
 
-    # Create the concrete LLM provider and wrap in LLMClient.
+    # Create the concrete LLM provider.
     provider = GroqProvider()
+
+    # Wrap the provider with the provider-agnostic client.
     llm_client = LLMClient(provider)
 
-    # Inject the service into the application state.
+    # Inject the LLM client into the application service.
     app.state.chat_service = ChatService(llm_client)
 
     # Register API routes.
@@ -35,4 +29,3 @@ def create_app() -> FastAPI:
 
 
 app = create_app()
-

@@ -1,19 +1,18 @@
 import sys
 from pathlib import Path
-from typing import Any, cast
 
-# Ensure backend directory is in sys.path
-backend_dir = Path(__file__).resolve().parent
-if str(backend_dir) not in sys.path:
-    sys.path.insert(0, str(backend_dir))
+# Allow this module to run directly with `python backend/main.py`.
+project_dir = Path(__file__).resolve().parent.parent
+if str(project_dir) not in sys.path:
+    sys.path.insert(0, str(project_dir))
 
 from fastapi import FastAPI
 
-from app.api.chat import router as chat_router
-from app.core.config import settings
-from app.llm.groq_provider import GroqProvider
-from app.llm.llm_client import LLMClient
-from services.chat_service import ChatService
+from backend.app.api.chat import router as chat_router
+from backend.app.core.config import settings
+from backend.app.llm.groq_provider import GroqProvider
+from backend.app.llm.llm_client import LLMClient
+from backend.services.chat_service import ChatService
 
 
 def create_app() -> FastAPI:
@@ -26,4 +25,3 @@ def create_app() -> FastAPI:
 
 
 app = create_app()
-

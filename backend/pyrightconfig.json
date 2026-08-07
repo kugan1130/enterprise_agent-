@@ -1,0 +1,11 @@
+{
+  "include": [
+    "."
+  ],
+  "venvPath": "..",
+  "venv": ".venv",
+  "extraPaths": [
+    ".."
+  ],
+  "reportMissingImports": "error"
+}

@@ -1,6 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BASE_DIR = Path(__file__).resolve().parents[2]
@@ -10,7 +11,9 @@ class Settings(BaseSettings):
     GROQ_API_KEY: str
     MODEL_NAME: str
     APP_NAME: str
-    DEBUG: bool = False
+    # Avoid the common system-level DEBUG variable, which may contain non-boolean
+    # values such as "release" and prevent the application from starting.
+    DEBUG: bool = Field(default=False, validation_alias="APP_DEBUG")
 
     model_config = SettingsConfigDict(
         env_file=BASE_DIR / ".env",
@@ -22,7 +25,8 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()
+    # Pydantic loads these required fields from the configured environment file.
+    return Settings()  # pyright: ignore[reportCallIssue]
 
 
 settings = get_settings()
