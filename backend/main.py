@@ -7,6 +7,8 @@ if str(project_dir) not in sys.path:
     sys.path.insert(0, str(project_dir))
 
 from fastapi import FastAPI
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from backend.app.api.auth import router as auth_router
 from backend.app.api.chat import router as chat_router
@@ -18,6 +20,8 @@ from backend.app.llm.groq_provider import GroqProvider
 from backend.app.llm.llm_client import LLMClient
 from backend.app.models.user import Base
 from backend.services.chat_service import ChatService
+
+frontend_dir = project_dir / "frontend"
 
 
 def create_app() -> FastAPI:
@@ -37,6 +41,14 @@ def create_app() -> FastAPI:
     app.include_router(chat_router)
     app.include_router(auth_router)
     app.include_router(documents_router)
+
+    if frontend_dir.exists():
+        app.mount("/static", StaticFiles(directory=str(frontend_dir)), name="static")
+
+        @app.get("/", include_in_schema=False)
+        def read_root():
+            return FileResponse(str(frontend_dir / "index.html"))
+
     return app
 
 

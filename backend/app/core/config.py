@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     MAX_UPLOAD_SIZE_MB: int = 10
     DATA_DIR: Path = BASE_DIR / "data" / "uploads"
+    LANGSMITH_API_KEY: str = ""
+    LANGSMITH_TRACING: bool = False
+    LANGSMITH_PROJECT: str = "enterprise-ai-assistant"
     MODEL_NAME: str
     APP_NAME: str
     # Avoid the common system-level DEBUG variable, which may contain non-boolean
