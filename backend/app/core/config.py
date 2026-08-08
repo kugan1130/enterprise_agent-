@@ -4,11 +4,14 @@ from pathlib import Path
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+
 BASE_DIR = Path(__file__).resolve().parents[2]
 
 
 class Settings(BaseSettings):
     GROQ_API_KEY: str
+    TAVILY_API_KEY: str = ""
+    DATABASE_URL: str = ""
     MODEL_NAME: str
     APP_NAME: str
     # Avoid the common system-level DEBUG variable, which may contain non-boolean

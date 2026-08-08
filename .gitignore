@@ -51,6 +51,7 @@ telemetry.json
 # Prevent local data directories from bloating the repo
 chroma/
 .chroma/
+.data/chroma/
 faiss_index/
 qdrant/
 data/raw/

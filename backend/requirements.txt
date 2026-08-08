@@ -1,8 +1,9 @@
 pydantic-settings
+functools
 groq
 fastapi
+fastapi[standard]
 uvicorn
-langgraph
 sqlalchemy
 psycopg2-binary
 python-dotenv
