@@ -1,35 +1,54 @@
-from backend.app.llm.base import BaseLLM
+from backend.app.agents.graph.workflow import create_workflow
+from backend.app.core.memory import (
+    add_conversation_turn,
+    format_history_as_text,
+    get_conversation_history,
+)
+from backend.app.llm.llm_client import LLMClient
 
 
 class ChatService:
     """
-    Handles chat-related business logic.
-
-    The service does not know which LLM provider
-    is being used. It only depends on the BaseLLM
-    interface.
+    Handles chat-related business logic and manages session-isolated Redis conversation memory.
     """
 
-    def __init__(self, llm: BaseLLM) -> None:
+    def __init__(self, llm: LLMClient) -> None:
         """
-        Store the LLM implementation.
+        Store the LLM implementation and workflow.
 
         Args:
-            llm: Any object implementing BaseLLM.
+            llm: Any LLMClient instance.
         """
         self._llm = llm
+        self._workflow = create_workflow(llm)
 
-    async def ask(self, prompt: str) -> str:
+    async def ask(self, prompt: str, session_id: str = "default_session") -> str:
         """
-        Send a user prompt to the LLM and
-        return the generated response.
+        Processes a user prompt within a session, loading and saving memory in Redis.
 
         Args:
-            prompt: User input.
+            prompt: User input text.
+            session_id: Unique session identifier for memory isolation.
 
         Returns:
             Model response.
         """
-        response = await self._llm.generate(prompt)
+        # 1. Retrieve prior conversation history for this session from Redis
+        history = get_conversation_history(session_id)
+        history_text = format_history_as_text(history)
+
+        # 2. Invoke LangGraph workflow with message and prior history context
+        result = await self._workflow.ainvoke(
+            {
+                "user_message": prompt,
+                "session_id": session_id,
+                "history": history_text,
+            }
+        )
+
+        response = result.get("final_response", "")
+
+        # 3. Store the turn (user & assistant messages) into Redis key conversation:{session_id}
+        add_conversation_turn(session_id, prompt, response)
 
         return response

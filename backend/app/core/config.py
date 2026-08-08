@@ -12,6 +12,8 @@ class Settings(BaseSettings):
     GROQ_API_KEY: str
     TAVILY_API_KEY: str = ""
     DATABASE_URL: str = ""
+    REDIS_URL: str = "redis://localhost:6379/0"
+    MAX_MEMORY_MESSAGES: int = 10
     MODEL_NAME: str
     APP_NAME: str
     # Avoid the common system-level DEBUG variable, which may contain non-boolean

@@ -11,6 +11,7 @@ router = APIRouter(prefix="/api", tags=["chat"])
 
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, description="User message to send to the chat service.")
+    session_id: str = Field(default="default_session", description="Session identifier for memory isolation.")
 
 
 class ChatResponse(BaseModel):
@@ -33,5 +34,5 @@ async def chat(
     payload: ChatRequest,
     chat_service: Annotated[ChatService, Depends(get_chat_service)],
 ) -> ChatResponse:
-    response = await chat_service.ask(payload.message)
+    response = await chat_service.ask(payload.message, payload.session_id)
     return ChatResponse(response=response)
