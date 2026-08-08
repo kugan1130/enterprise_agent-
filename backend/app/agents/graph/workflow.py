@@ -5,8 +5,11 @@ from backend.app.agents.graph.state import GraphState
 from backend.app.agents.graph.nodes.approval import approval_check_node
 from backend.app.agents.graph.nodes.critic import critic_node
 from backend.app.agents.graph.nodes.guardrail import input_guardrail_node
+from backend.app.agents.graph.nodes.planner import planner_node
 from backend.app.agents.graph.nodes.rag import rag_node
 from backend.app.agents.graph.nodes.refine import refine_node
+from backend.app.agents.graph.nodes.reporter import report_node
+from backend.app.agents.graph.nodes.researcher import parallel_research_node
 from backend.app.agents.graph.nodes.sql import sql_node
 from backend.app.agents.graph.nodes.supervisor import supervisor_node
 from backend.app.llm.llm_client import LLMClient
@@ -16,7 +19,7 @@ MAX_REFLECTION_ATTEMPTS = 1
 
 
 def create_workflow(llm_client: LLMClient):
-    """Build the multi-agent supervisor workflow with Guardrails, Tool Permissions, Approval, and Reflection."""
+    """Build the multi-agent supervisor workflow with Planning, Parallel Research, Reporting, Guardrails, Approval, and Reflection."""
 
     async def guardrail(state: GraphState) -> Dict[str, Any]:
         return input_guardrail_node(state)
@@ -29,6 +32,15 @@ def create_workflow(llm_client: LLMClient):
 
     async def sql_agent(state: GraphState) -> Dict[str, Any]:
         return await sql_node(state, llm_client)
+
+    async def planner(state: GraphState) -> Dict[str, Any]:
+        return await planner_node(state, llm_client)
+
+    async def researcher(state: GraphState) -> Dict[str, Any]:
+        return await parallel_research_node(state, llm_client)
+
+    async def reporter(state: GraphState) -> Dict[str, Any]:
+        return await report_node(state, llm_client)
 
     async def llm_node(state: GraphState) -> Dict[str, Any]:
         web_results = state.get("web_results")
@@ -110,6 +122,9 @@ def create_workflow(llm_client: LLMClient):
     graph.add_node("rag_node", rag_node)
     graph.add_node("sql_node", sql_agent)
     graph.add_node("web_node", web_node)
+    graph.add_node("planner_node", planner)
+    graph.add_node("researcher_node", researcher)
+    graph.add_node("reporter_node", reporter)
     graph.add_node("llm_node", llm_node)
     graph.add_node("critic_node", critic)
     graph.add_node("refine_node", refine)
@@ -126,7 +141,13 @@ def create_workflow(llm_client: LLMClient):
     graph.add_conditional_edges(
         "supervisor",
         lambda state: state["route"],
-        {"direct": "llm_node", "rag": "rag_node", "web": "web_node", "sql": "approval_node"},
+        {
+            "direct": "llm_node",
+            "rag": "rag_node",
+            "web": "web_node",
+            "sql": "approval_node",
+            "research": "planner_node",
+        },
     )
 
     graph.add_conditional_edges(
@@ -138,6 +159,9 @@ def create_workflow(llm_client: LLMClient):
     graph.add_edge("rag_node", "llm_node")
     graph.add_edge("web_node", "llm_node")
     graph.add_edge("sql_node", "llm_node")
+    graph.add_edge("planner_node", "researcher_node")
+    graph.add_edge("researcher_node", "reporter_node")
+    graph.add_edge("reporter_node", "critic_node")
     graph.add_edge("llm_node", "critic_node")
 
     graph.add_conditional_edges(

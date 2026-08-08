@@ -71,20 +71,53 @@ def validate_read_only_sql(query: str) -> str:
     return cleaned_query
 
 
+def generate_chart_metadata(columns: List[str], rows: List[Dict[str, Any]]) -> Any:
+    """
+    Generates structured chart metadata (bar, line, pie) for tabular SQL query results.
+    Does not produce chart data for scalar/single row results.
+    """
+    if not columns or not rows or len(rows) <= 1 or len(columns) < 2:
+        return None
+
+    # Identify numeric column for Y axis and string/categorical column for X axis
+    x_col = None
+    y_col = None
+
+    for col in columns:
+        val = rows[0][col]
+        if isinstance(val, (int, float)) and y_col is None:
+            y_col = col
+        elif isinstance(val, (str, datetime)) and x_col is None:
+            x_col = col
+
+    if not x_col:
+        x_col = columns[0]
+    if not y_col:
+        y_col = columns[1] if len(columns) > 1 else columns[0]
+
+    # Select chart type
+    lower_x = str(x_col).lower()
+    if "date" in lower_x or "time" in lower_x or "month" in lower_x or "year" in lower_x:
+        chart_type = "line"
+    elif len(rows) <= 5:
+        chart_type = "pie"
+    else:
+        chart_type = "bar"
+
+    chart_data = [{"x": str(r.get(x_col, "")), "y": r.get(y_col, 0)} for r in rows]
+
+    return {
+        "chart_type": chart_type,
+        "x": str(x_col),
+        "y": str(y_col),
+        "data": chart_data,
+    }
+
+
 def execute_sql_query(query: str) -> Dict[str, Any]:
     """
     Validates and executes a read-only SQL query against PostgreSQL using the existing SessionLocal.
-
-    Args:
-        query: SQL string to validate and execute.
-
-    Returns:
-        Structured dictionary for LLM consumption:
-            - success (bool): True if execution succeeded, False otherwise.
-            - columns (List[str]): List of column names if rows returned.
-            - rows (List[Dict[str, Any]]): List of row dicts.
-            - row_count (int): Number of rows returned.
-            - error (Optional[str]): Error message if validation or database execution failed.
+    Generates chart metadata for tabular data.
     """
     try:
         validated_sql = validate_read_only_sql(query)
@@ -94,6 +127,7 @@ def execute_sql_query(query: str) -> Dict[str, Any]:
             "columns": [],
             "rows": [],
             "row_count": 0,
+            "chart": None,
             "error": str(val_err),
         }
 
@@ -104,11 +138,13 @@ def execute_sql_query(query: str) -> Dict[str, Any]:
                 columns = list(result.keys())
                 raw_rows = result.fetchall()
                 rows = [dict(zip(columns, row)) for row in raw_rows]
+                chart = generate_chart_metadata(columns, rows)
                 return {
                     "success": True,
                     "columns": columns,
                     "rows": rows,
                     "row_count": len(rows),
+                    "chart": chart,
                     "error": None,
                 }
             else:
@@ -117,6 +153,7 @@ def execute_sql_query(query: str) -> Dict[str, Any]:
                     "columns": [],
                     "rows": [],
                     "row_count": 0,
+                    "chart": None,
                     "error": None,
                 }
     except Exception as db_err:
@@ -125,5 +162,6 @@ def execute_sql_query(query: str) -> Dict[str, Any]:
             "columns": [],
             "rows": [],
             "row_count": 0,
+            "chart": None,
             "error": f"Database execution error: {str(db_err)}",
         }

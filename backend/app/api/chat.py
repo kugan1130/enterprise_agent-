@@ -1,8 +1,9 @@
-from typing import Annotated
-
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from backend.app.api.auth import get_current_user
+from backend.app.models.user import User
 from backend.services.chat_service import ChatService
 
 
@@ -34,5 +35,18 @@ async def chat(
     payload: ChatRequest,
     chat_service: Annotated[ChatService, Depends(get_chat_service)],
 ) -> ChatResponse:
+    """Non-streaming chat response endpoint."""
     response = await chat_service.ask(payload.message, payload.session_id)
     return ChatResponse(response=response)
+
+
+@router.post("/chat/stream")
+async def chat_stream(
+    payload: ChatRequest,
+    chat_service: Annotated[ChatService, Depends(get_chat_service)],
+):
+    """Event-driven Server-Sent Events (SSE) streaming chat endpoint."""
+    return StreamingResponse(
+        chat_service.ask_stream(payload.message, payload.session_id),
+        media_type="text/event-stream",
+    )

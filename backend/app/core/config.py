@@ -14,6 +14,10 @@ class Settings(BaseSettings):
     DATABASE_URL: str = ""
     REDIS_URL: str = "redis://localhost:6379/0"
     MAX_MEMORY_MESSAGES: int = 10
+    JWT_SECRET: str = "super_secret_enterprise_jwt_key_2026"
+    JWT_ALGORITHM: str = "HS256"
+    MAX_UPLOAD_SIZE_MB: int = 10
+    DATA_DIR: Path = BASE_DIR / "data" / "uploads"
     MODEL_NAME: str
     APP_NAME: str
     # Avoid the common system-level DEBUG variable, which may contain non-boolean

@@ -58,3 +58,51 @@ def ingest_documents(
         embeddings=cast(list[Embedding], embed_passages(texts)),
     )
     return len(chunks)
+
+
+def ingest_single_pdf(
+    pdf_path: Path,
+    doc_metadata: dict,
+    *,
+    persist_path: Path = DEFAULT_CHROMA_PATH,
+    collection_name: str = COLLECTION_NAME,
+) -> int:
+    """Load a single uploaded PDF file, chunk, embed, and upsert to ChromaDB."""
+    documents = PyPDFLoader(str(pdf_path)).load()
+    if not documents:
+        return 0
+
+    chunks = RecursiveCharacterTextSplitter(
+        chunk_size=1_000,
+        chunk_overlap=150,
+    ).split_documents(documents)
+
+    doc_id = doc_metadata.get("document_id", pdf_path.stem)
+    texts = [chunk.page_content for chunk in chunks]
+    ids = [f"{doc_id}-{idx}" for idx in range(len(chunks))]
+
+    metadatas: list[Metadata] = [
+        {
+            "document_id": doc_id,
+            "filename": doc_metadata.get("filename", pdf_path.name),
+            "source": doc_metadata.get("filename", pdf_path.name),
+            "uploaded_by": doc_metadata.get("uploaded_by", "system"),
+            "upload_timestamp": doc_metadata.get("upload_timestamp", ""),
+            "chunk_id": chunk_id,
+            "page": chunk.metadata.get("page", 0),
+        }
+        for chunk, chunk_id in zip(chunks, ids, strict=True)
+    ]
+
+    client = chromadb.PersistentClient(path=str(persist_path))
+    collection = client.get_or_create_collection(
+        name=collection_name,
+        metadata={"hnsw:space": "cosine"},
+    )
+    collection.upsert(
+        ids=ids,
+        documents=texts,
+        metadatas=metadatas,
+        embeddings=cast(list[Embedding], embed_passages(texts)),
+    )
+    return len(chunks)
