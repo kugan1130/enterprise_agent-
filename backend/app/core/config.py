@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     LANGSMITH_API_KEY: str = ""
     LANGSMITH_TRACING: bool = False
     LANGSMITH_PROJECT: str = "enterprise-ai-assistant"
+    ALLOWED_ORIGINS: str = "http://localhost:8000,http://127.0.0.1:8000"
+    AWS_REGION: str = "us-east-1"
+    S3_BUCKET_NAME: str = ""
     MODEL_NAME: str
     APP_NAME: str
     # Avoid the common system-level DEBUG variable, which may contain non-boolean

@@ -7,12 +7,14 @@ if str(project_dir) not in sys.path:
     sys.path.insert(0, str(project_dir))
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend.app.api.auth import router as auth_router
 from backend.app.api.chat import router as chat_router
 from backend.app.api.documents import router as documents_router
+from backend.app.api.health import router as health_router
 from backend.app.core.config import settings
 from backend.app.core.database import engine
 from backend.app.core.middleware import CorrelationIdMiddleware, enterprise_exception_handler
@@ -30,7 +32,17 @@ def create_app() -> FastAPI:
 
     app = FastAPI(title=settings.APP_NAME, debug=settings.DEBUG)
 
-    # Middleware & Error handling
+    # CORS Middleware
+    origins = [o.strip() for o in settings.ALLOWED_ORIGINS.split(",") if o.strip()]
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=origins or ["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    # Correlation ID & Exception handling
     app.add_middleware(CorrelationIdMiddleware)
     app.add_exception_handler(Exception, enterprise_exception_handler)
 
@@ -38,6 +50,7 @@ def create_app() -> FastAPI:
     llm_client = LLMClient(provider)
     app.state.chat_service = ChatService(llm_client)
 
+    app.include_router(health_router)
     app.include_router(chat_router)
     app.include_router(auth_router)
     app.include_router(documents_router)
