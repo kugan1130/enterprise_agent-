@@ -2,7 +2,9 @@ from typing import Any, Dict
 from langgraph.graph import END, START, StateGraph
 
 from backend.app.agents.graph.state import GraphState
+from backend.app.agents.graph.nodes.approval import approval_check_node
 from backend.app.agents.graph.nodes.critic import critic_node
+from backend.app.agents.graph.nodes.guardrail import input_guardrail_node
 from backend.app.agents.graph.nodes.rag import rag_node
 from backend.app.agents.graph.nodes.refine import refine_node
 from backend.app.agents.graph.nodes.sql import sql_node
@@ -14,10 +16,16 @@ MAX_REFLECTION_ATTEMPTS = 1
 
 
 def create_workflow(llm_client: LLMClient):
-    """Build the multi-agent supervisor workflow with Reflection and Critic evaluation."""
+    """Build the multi-agent supervisor workflow with Guardrails, Tool Permissions, Approval, and Reflection."""
+
+    async def guardrail(state: GraphState) -> Dict[str, Any]:
+        return input_guardrail_node(state)
 
     async def supervisor(state: GraphState) -> Dict[str, Any]:
         return await supervisor_node(state, llm_client)
+
+    async def approval(state: GraphState) -> Dict[str, Any]:
+        return approval_check_node(state)
 
     async def sql_agent(state: GraphState) -> Dict[str, Any]:
         return await sql_node(state, llm_client)
@@ -72,7 +80,21 @@ def create_workflow(llm_client: LLMClient):
         return await refine_node(state, llm_client)
 
     async def final_response_node(state: GraphState) -> Dict[str, Any]:
+        if state.get("guardrail_allowed") is False:
+            return {"final_response": f"Security Guardrail Rejection: {state.get('guardrail_reason', 'Request blocked.')}"}
+        if state.get("requires_approval") is True and state.get("human_approved") is not True:
+            return {"final_response": "Action Paused: Human approval is required to execute sensitive/high-impact operations."}
         return {"final_response": state.get("draft_response", "")}
+
+    def route_after_guardrail(state: GraphState) -> str:
+        if state.get("guardrail_allowed") is False:
+            return "final_response_node"
+        return "supervisor"
+
+    def route_after_approval(state: GraphState) -> str:
+        if state.get("requires_approval") is True and state.get("human_approved") is not True:
+            return "final_response_node"
+        return "sql_node"
 
     def route_after_critic(state: GraphState) -> str:
         approved = state.get("critic_approved", True)
@@ -82,7 +104,9 @@ def create_workflow(llm_client: LLMClient):
         return "final_response_node"
 
     graph = StateGraph(GraphState)
+    graph.add_node("guardrail_node", guardrail)
     graph.add_node("supervisor", supervisor)
+    graph.add_node("approval_node", approval)
     graph.add_node("rag_node", rag_node)
     graph.add_node("sql_node", sql_agent)
     graph.add_node("web_node", web_node)
@@ -91,12 +115,26 @@ def create_workflow(llm_client: LLMClient):
     graph.add_node("refine_node", refine)
     graph.add_node("final_response_node", final_response_node)
 
-    graph.add_edge(START, "supervisor")
+    graph.add_edge(START, "guardrail_node")
+
+    graph.add_conditional_edges(
+        "guardrail_node",
+        route_after_guardrail,
+        {"supervisor": "supervisor", "final_response_node": "final_response_node"},
+    )
+
     graph.add_conditional_edges(
         "supervisor",
         lambda state: state["route"],
-        {"direct": "llm_node", "rag": "rag_node", "web": "web_node", "sql": "sql_node"},
+        {"direct": "llm_node", "rag": "rag_node", "web": "web_node", "sql": "approval_node"},
     )
+
+    graph.add_conditional_edges(
+        "approval_node",
+        route_after_approval,
+        {"sql_node": "sql_node", "final_response_node": "final_response_node"},
+    )
+
     graph.add_edge("rag_node", "llm_node")
     graph.add_edge("web_node", "llm_node")
     graph.add_edge("sql_node", "llm_node")
