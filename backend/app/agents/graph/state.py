@@ -1,17 +1,15 @@
-from typing import Literal, NotRequired, TypedDict
+from typing import Any, Literal, NotRequired, TypedDict
 
 
 class GraphState(TypedDict):
     """Data passed through the minimal chat workflow."""
 
     user_message: str
-    session_id: NotRequired[str]
-    history: NotRequired[str]
-    route: NotRequired[Literal["direct", "rag", "web", "sql", "research"]]
-    guardrail_allowed: NotRequired[bool]
-    guardrail_reason: NotRequired[str]
-    tool_permitted: NotRequired[bool]
-    requires_approval: NotRequired[bool]
+    route: NotRequired[Literal["direct", "rag", "web", "sql"]]
+    rag_context: NotRequired[str]
+    web_results: NotRequired[str]
+    sql_result: NotRequired[str]
+    final_response: NotRequired[str]
     human_approved: NotRequired[bool]
     rag_context: NotRequired[str]
     web_results: NotRequired[str]

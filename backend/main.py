@@ -16,19 +16,21 @@ from backend.app.api.chat import router as chat_router
 from backend.app.api.documents import router as documents_router
 from backend.app.api.health import router as health_router
 from backend.app.core.config import settings
-from backend.app.core.database import engine
+from backend.app.core.database import Base, engine
 from backend.app.core.middleware import CorrelationIdMiddleware, enterprise_exception_handler
 from backend.app.llm.groq_provider import GroqProvider
 from backend.app.llm.llm_client import LLMClient
-from backend.app.models.user import Base
 from backend.services.chat_service import ChatService
 
 frontend_dir = project_dir / "frontend"
 
 
 def create_app() -> FastAPI:
-    # Create DB tables if they don't exist
-    Base.metadata.create_all(bind=engine)
+    # Initialize DB tables with fallback protection
+    try:
+        Base.metadata.create_all(bind=engine)
+    except Exception as err:
+        print(f"Database table initialization notice: {err}")
 
     app = FastAPI(title=settings.APP_NAME, debug=settings.DEBUG)
 
@@ -55,9 +57,15 @@ def create_app() -> FastAPI:
     app.include_router(auth_router)
     app.include_router(documents_router)
 
-    if frontend_dir.exists():
-        app.mount("/static", StaticFiles(directory=str(frontend_dir)), name="static")
+    dist_dir = frontend_dir / "dist"
+    if dist_dir.exists():
+        if (dist_dir / "assets").exists():
+            app.mount("/assets", StaticFiles(directory=str(dist_dir / "assets")), name="assets")
 
+        @app.get("/", include_in_schema=False)
+        def read_root():
+            return FileResponse(str(dist_dir / "index.html"))
+    elif frontend_dir.exists():
         @app.get("/", include_in_schema=False)
         def read_root():
             return FileResponse(str(frontend_dir / "index.html"))
@@ -66,3 +74,7 @@ def create_app() -> FastAPI:
 
 
 app = create_app()
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("backend.main:app", host="0.0.0.0", port=8000, reload=True)

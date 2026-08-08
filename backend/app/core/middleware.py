@@ -1,67 +1,34 @@
-"""Middleware for Correlation ID tracking, structured logging, and unified error handling."""
+"""Enterprise HTTP Correlation ID and exception handler middleware."""
 
-import logging
 import uuid
-from typing import Any, Dict
-from fastapi import HTTPException, Request, status
+from fastapi import Request, status
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
-# Configure logger
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - [%(levelname)s] - correlation_id=%(correlation_id)s - %(message)s",
-)
-
 
 class CorrelationIdMiddleware(BaseHTTPMiddleware):
-    """Middleware that injects an X-Request-ID header into every incoming request and response."""
+    """Injects or propagates X-Correlation-ID headers across HTTP request cycles."""
 
     async def dispatch(self, request: Request, call_next):
-        correlation_id = request.headers.get("X-Request-ID", str(uuid.uuid4()))
+        correlation_id = request.headers.get("X-Correlation-ID") or uuid.uuid4().hex
         request.state.correlation_id = correlation_id
 
         response = await call_next(request)
-        response.headers["X-Request-ID"] = correlation_id
+        response.headers["X-Correlation-ID"] = correlation_id
         return response
 
 
-def get_request_id(request: Request) -> str:
-    """Retrieve correlation ID from request state."""
-    return getattr(request.state, "correlation_id", "no-id")
-
-
 async def enterprise_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-    """
-    Standardized JSON error handler returning safe, structured error objects.
-    Prevents leakage of raw stack traces, API keys, or database credentials.
-    """
-    correlation_id = get_request_id(request)
-
-    if isinstance(exc, HTTPException):
-        status_code = exc.status_code
-        error_code = "HTTP_ERROR"
-        if status_code == 401:
-            error_code = "UNAUTHORIZED"
-        elif status_code == 403:
-            error_code = "FORBIDDEN"
-        elif status_code == 404:
-            error_code = "NOT_FOUND"
-        elif status_code == 400:
-            error_code = "BAD_REQUEST"
-
-        message = str(exc.detail)
-    else:
-        status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
-        error_code = "INTERNAL_SERVER_ERROR"
-        message = "An internal server error occurred. Please contact system administration."
+    """Global exception handler returning clean JSON error responses."""
+    correlation_id = getattr(request.state, "correlation_id", "N/A")
+    print(f"Unhandled Exception [{correlation_id}]: {exc}")
 
     return JSONResponse(
-        status_code=status_code,
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content={
             "error": {
-                "code": error_code,
-                "message": message,
+                "code": "INTERNAL_SERVER_ERROR",
+                "message": str(exc) if str(exc) else "An unexpected internal server error occurred.",
                 "correlation_id": correlation_id,
             }
         },

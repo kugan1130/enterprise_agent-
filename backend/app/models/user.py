@@ -1,32 +1,26 @@
-"""SQLAlchemy models for User Authentication and Document Management."""
+"""SQLAlchemy ORM models for Users and Uploaded Document Records."""
 
 from datetime import datetime
 from sqlalchemy import Column, DateTime, Integer, String
-from sqlalchemy.orm import declarative_base
-
-Base = declarative_base()
+from backend.app.core.database import Base
 
 
 class User(Base):
-    """User account model for Auth & RBAC."""
-
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
-    username = Column(String(50), unique=True, nullable=False, index=True)
-    email = Column(String(100), unique=True, nullable=False, index=True)
+    username = Column(String(50), unique=True, index=True, nullable=False)
+    email = Column(String(100), unique=True, index=True, nullable=False)
     hashed_password = Column(String(255), nullable=False)
-    role = Column(String(20), nullable=False, default="user") # 'user' or 'admin'
+    role = Column(String(20), default="user", nullable=False)  # 'user' or 'admin'
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
 class DocumentRecord(Base):
-    """Metadata record for uploaded enterprise documents."""
-
     __tablename__ = "document_records"
 
     id = Column(Integer, primary_key=True, index=True)
-    document_id = Column(String(100), unique=True, nullable=False, index=True)
+    document_id = Column(String(50), unique=True, index=True, nullable=False)
     filename = Column(String(255), nullable=False)
     safe_filename = Column(String(255), nullable=False)
     file_size = Column(Integer, nullable=False)

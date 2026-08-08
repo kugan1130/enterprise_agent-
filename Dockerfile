@@ -1,52 +1,51 @@
-# Multi-stage production Dockerfile for Enterprise AI Assistant
-FROM python:3.12-slim as builder
+# Production Multi-Stage Dockerfile for Enterprise AI Assistant
+
+FROM python:3.11-slim AS builder
 
 WORKDIR /app
 
 # Install system build dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc g++ libpq-dev curl \
-    && rm -rf /var/lib/apt/lists/*
+    build-essential \
+    libpq-dev \
+    gcc \
+    curl \
+    && rm -rf /var/lib/apt-get/lists/*
 
-COPY requirements.txt ./
-RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
+# Copy python dependency requirements
+COPY backend/requirements.txt /app/requirements.txt
 
-# Runner stage
-FROM python:3.12-slim as runner
+# Create virtualenv and install python dependencies
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
+
+# Final runtime image
+FROM python:3.11-slim AS runner
 
 WORKDIR /app
 
-# Install runtime dependencies (libpq for postgres, curl for healthcheck)
+# Install runtime libpq for PostgreSQL connection
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libpq5 curl \
-    && rm -rf /var/lib/apt/lists/*
+    libpq5 \
+    curl \
+    && rm -rf /var/lib/apt-get/lists/*
 
-# Copy installed Python packages from builder
-COPY --from=builder /install /usr/local
-
-# Create non-root application user
-RUN groupadd -r appgroup && useradd -r -g appgroup -u 1001 appuser
+# Copy virtual environment from builder stage
+COPY --from=builder /opt/venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+ENV PYTHONUNBUFFERED=1
 
 # Copy application source code
-COPY backend ./backend
-COPY frontend ./frontend
+COPY backend /app/backend
+COPY frontend /app/frontend
+COPY main.py /app/main.py
 
-# Create directory structure for uploads & vector store with correct permissions
-RUN mkdir -p /app/data/uploads /app/.data/chroma \
-    && chown -R appuser:appgroup /app
-
-# Environment defaults
-ENV PYTHONUNBUFFERED=1 \
-    PORT=8000 \
-    APP_DEBUG=False
+# Create data directory for ChromaDB and PDF reports
+RUN mkdir -p /app/.data/chroma /app/.data/reports
 
 EXPOSE 8000
 
-# Container healthcheck
-HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
-
-USER appuser
-
-# Startup command
-CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Render dynamic $PORT support (defaults to 8000 if PORT is unset)
+CMD ["sh", "-c", "uvicorn backend.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

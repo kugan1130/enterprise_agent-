@@ -1,18 +1,16 @@
+from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from backend.app.api.auth import get_current_user
-from backend.app.models.user import User
 from backend.services.chat_service import ChatService
-
 
 router = APIRouter(prefix="/api", tags=["chat"])
 
 
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, description="User message to send to the chat service.")
-    session_id: str = Field(default="default_session", description="Session identifier for memory isolation.")
+    session_id: str = Field(default="default_session", description="Session ID for chat memory continuity.")
 
 
 class ChatResponse(BaseModel):

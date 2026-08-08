@@ -1,33 +1,33 @@
+"""Application configuration settings using Pydantic Settings."""
+
 from functools import lru_cache
 from pathlib import Path
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-
 BASE_DIR = Path(__file__).resolve().parents[2]
 
 
 class Settings(BaseSettings):
-    GROQ_API_KEY: str
+    APP_NAME: str = "Enterprise Multi-Agent AI Assistant"
+    MODEL_NAME: str = "llama-3.3-70b-versatile"
+    GROQ_API_KEY: str = ""
     TAVILY_API_KEY: str = ""
-    DATABASE_URL: str = ""
+    DATABASE_URL: str = "sqlite:///./enterprise_app.db"
     REDIS_URL: str = "redis://localhost:6379/0"
-    MAX_MEMORY_MESSAGES: int = 10
-    JWT_SECRET: str = "super_secret_enterprise_jwt_key_2026"
-    JWT_ALGORITHM: str = "HS256"
+    JWT_SECRET: str = "enterprise-secret-key-change-in-production-2026"
+    ALLOWED_ORIGINS: str = "*"
     MAX_UPLOAD_SIZE_MB: int = 10
-    DATA_DIR: Path = BASE_DIR / "data" / "uploads"
-    LANGSMITH_API_KEY: str = ""
-    LANGSMITH_TRACING: bool = False
-    LANGSMITH_PROJECT: str = "enterprise-ai-assistant"
-    ALLOWED_ORIGINS: str = "http://localhost:8000,http://127.0.0.1:8000"
-    AWS_REGION: str = "us-east-1"
-    S3_BUCKET_NAME: str = ""
-    MODEL_NAME: str
-    APP_NAME: str
-    # Avoid the common system-level DEBUG variable, which may contain non-boolean
-    # values such as "release" and prevent the application from starting.
+    DATA_DIR: Path = BASE_DIR / ".data"
+    
+    # LangSmith & MCP Tracing
+    LANGCHAIN_TRACING_V2: str = "true"
+    LANGCHAIN_API_KEY: str = ""
+    LANGCHAIN_PROJECT: str = "enterprise-ai-assistant"
+    LANGCHAIN_ENDPOINT: str = "https://api.smith.langchain.com"
+
+    # Avoid the common system-level DEBUG variable
     DEBUG: bool = Field(default=False, validation_alias="APP_DEBUG")
 
     model_config = SettingsConfigDict(
@@ -40,8 +40,7 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    # Pydantic loads these required fields from the configured environment file.
-    return Settings()  # pyright: ignore[reportCallIssue]
+    return Settings()
 
 
 settings = get_settings()
@@ -51,4 +50,3 @@ if __name__ == "__main__":
     print("APP_NAME :", settings.APP_NAME)
     print("MODEL    :", settings.MODEL_NAME)
     print("DEBUG    :", settings.DEBUG)
-    print("API KEY  :", settings.GROQ_API_KEY[:10] + "...")

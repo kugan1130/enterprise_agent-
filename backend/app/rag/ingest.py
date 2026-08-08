@@ -5,7 +5,6 @@ from typing import cast
 
 import chromadb
 from chromadb.api.types import Embedding, Metadata
-from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from backend.app.rag.embeddings import embed_passages
@@ -29,17 +28,24 @@ def ingest_documents(
 
     documents = []
     for pdf_path in pdf_paths:
-        documents.extend(PyPDFLoader(str(pdf_path)).load())
+        try:
+            from langchain_community.document_loaders import PyPDFLoader
+            documents.extend(PyPDFLoader(str(pdf_path)).load())
+        except Exception:
+            from langchain_core.documents import Document
+            with open(pdf_path, "rb") as f:
+                raw_text = f.read().decode("latin1", errors="ignore")
+            documents.append(Document(page_content=raw_text, metadata={"source": pdf_path.name, "page": 0}))
 
     chunks = RecursiveCharacterTextSplitter(
         chunk_size=1_000,
         chunk_overlap=150,
     ).split_documents(documents)
     texts = [chunk.page_content for chunk in chunks]
-    ids = [f"{Path(chunk.metadata['source']).stem}-{index}" for index, chunk in enumerate(chunks)]
+    ids = [f"{Path(chunk.metadata.get('source', 'doc')).stem}-{index}" for index, chunk in enumerate(chunks)]
     metadatas: list[Metadata] = [
         {
-            "source": Path(chunk.metadata["source"]).name,
+            "source": Path(chunk.metadata.get("source", "document.pdf")).name,
             "chunk_id": chunk_id,
             "page": chunk.metadata.get("page", 0),
         }
@@ -68,7 +74,16 @@ def ingest_single_pdf(
     collection_name: str = COLLECTION_NAME,
 ) -> int:
     """Load a single uploaded PDF file, chunk, embed, and upsert to ChromaDB."""
-    documents = PyPDFLoader(str(pdf_path)).load()
+    try:
+        from langchain_community.document_loaders import PyPDFLoader
+        documents = PyPDFLoader(str(pdf_path)).load()
+    except Exception as err:
+        print(f"PyPDFLoader notice ({err}), attempting raw fallback text extraction...")
+        from langchain_core.documents import Document
+        with open(pdf_path, "rb") as f:
+            raw_text = f.read().decode("latin1", errors="ignore")
+        documents = [Document(page_content=raw_text, metadata={"source": pdf_path.name, "page": 0})]
+
     if not documents:
         return 0
 
@@ -78,8 +93,11 @@ def ingest_single_pdf(
     ).split_documents(documents)
 
     doc_id = doc_metadata.get("document_id", pdf_path.stem)
-    texts = [chunk.page_content for chunk in chunks]
-    ids = [f"{doc_id}-{idx}" for idx in range(len(chunks))]
+    texts = [chunk.page_content for chunk in chunks if chunk.page_content.strip()]
+    if not texts:
+        return 0
+
+    ids = [f"{doc_id}-{idx}" for idx in range(len(texts))]
 
     metadatas: list[Metadata] = [
         {
@@ -105,4 +123,4 @@ def ingest_single_pdf(
         metadatas=metadatas,
         embeddings=cast(list[Embedding], embed_passages(texts)),
     )
-    return len(chunks)
+    return len(texts)

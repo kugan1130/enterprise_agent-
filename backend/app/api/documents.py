@@ -1,4 +1,4 @@
-"""PDF Upload and Document Management API endpoints."""
+"""PDF Upload and Document Ingestion API endpoints."""
 
 import uuid
 from datetime import datetime
@@ -24,12 +24,12 @@ async def upload_pdf(
 ):
     """
     Uploads and automatically ingests a PDF document into ChromaDB for RAG search.
-    Enforces file type, file size limits, safe UUID naming, and authentication.
+    Enforces file type, size limits, safe UUID naming, and automatic vector indexing.
     """
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid file type. Only PDF documents are allowed.",
+            detail="Invalid file type. Only PDF documents (.pdf) are allowed.",
         )
 
     content = await file.read()
@@ -67,10 +67,10 @@ async def upload_pdf(
     except Exception as err:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to ingest document into ChromaDB: {err}",
+            detail=f"Unable to process and index PDF: {err}",
         )
 
-    # Store record in PostgreSQL
+    # Store record in database
     doc_record = DocumentRecord(
         document_id=document_id,
         filename=file.filename,
@@ -87,15 +87,16 @@ async def upload_pdf(
         "filename": file.filename,
         "chunks_ingested": chunks_ingested,
         "status": "ingested",
+        "message": f"{file.filename} is ready. You can now ask questions about it.",
     }
 
 
 @router.get("")
 def list_documents(
-    admin_user: User = Depends(require_admin_user),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Admin-only endpoint listing all uploaded document records."""
+    """Returns list of uploaded documents."""
     records = db.query(DocumentRecord).all()
     return [
         {

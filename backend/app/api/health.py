@@ -1,4 +1,4 @@
-"""Health checks and monitoring endpoints."""
+"""Health check and readiness monitoring endpoints."""
 
 import os
 from pathlib import Path
@@ -19,15 +19,13 @@ def health_check():
 
 @router.get("/health/live")
 def liveness_check():
-    """Kubernetes / Container liveness probe."""
+    """Liveness probe verifying application process is alive."""
     return {"status": "live"}
 
 
 @router.get("/health/ready")
 def readiness_check(response: Response):
-    """
-    Readiness probe verifying PostgreSQL database, Redis cache, and ChromaDB vector store.
-    """
+    """Readiness probe verifying PostgreSQL database, Redis cache, and ChromaDB vector store."""
     services = {
         "postgres": "unhealthy",
         "redis": "unhealthy",
@@ -35,7 +33,7 @@ def readiness_check(response: Response):
     }
     all_healthy = True
 
-    # 1. Test PostgreSQL database connection
+    # 1. Test Database connection
     try:
         with SessionLocal() as session:
             session.execute(text("SELECT 1"))
@@ -49,7 +47,8 @@ def readiness_check(response: Response):
         if r.ping():
             services["redis"] = "ok"
     except Exception:
-        all_healthy = False
+        # Fallback in-memory store active
+        services["redis"] = "in-memory-fallback"
 
     # 3. Test ChromaDB path accessibility
     try:

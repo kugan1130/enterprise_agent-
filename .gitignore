@@ -1,75 +1,65 @@
 # ==============================================================================
-# 1. AI, LLM & ENVIRONMENTAL SECRETS (CRITICAL)
+# 1. SECRETS & ENVIRONMENT VARIABLES (CRITICAL)
 # ==============================================================================
-# Never commit API keys or runtime configurations
 .env
 .env.*
 !.env.example
 secrets.json
-config.yaml
-!config.example.yaml
 
 # ==============================================================================
-# 2. GO BINARIES & ARTIFACTS
+# 2. PYTHON VIRTUAL ENVS & CACHE
 # ==============================================================================
-# Compiled binaries and execution files
-*.exe
-*.exe~
-*.dll
-*.so
-*.dylib
-bin/
-out/
+.venv/
+venv/
+ENV/
+env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
+
+# ==============================================================================
+# 3. NODE & FRONTEND BUILD ARTIFACTS
+# ==============================================================================
+node_modules/
+frontend/node_modules/
+frontend/dist/
 dist/
-
-# Test artifacts and coverage files
-*.test
-*.out
-coverage.txt
-profile.out
+build/
+.npm
+*.tsbuildinfo
 
 # ==============================================================================
-# 3. AGENT RUNTIME, LOGS & CACHE
+# 4. DATABASES, VECTOR STORES & RUNTIME DATA
 # ==============================================================================
-# Agent logs, trace data, and state snapshots
-*.log
-logs/
-agent_outputs/
-runs/
-.cache/
-telemetry.json
-
-# Local agent database states and runtime key-value dumps
 *.db
 *.sqlite
-*.bbolt
-*.badger
-
-# ==============================================================================
-# 4. VECTOR DATABASES & LOCAL DATA
-# ==============================================================================
-# Prevent local data directories from bloating the repo
+*.sqlite3
+enterprise_app.db
+.data/
+data/raw/
+data/processed/
 chroma/
 .chroma/
 .data/chroma/
-faiss_index/
-qdrant/
-data/raw/
-data/processed/
-*.csv
-*.jsonl
-*.parquet
+.data/reports/
 
 # ==============================================================================
-# 5. CODE EDITORS & DEVELOPMENT TOOLS
+# 5. LOGS & TEMPORARY FILES
+# ==============================================================================
+*.log
+logs/
+*.tmp
+*.bak
+*.swp
+.DS_Store
+Thumbs.db
+
+# ==============================================================================
+# 6. IDE CONFIGURATIONS
 # ==============================================================================
 .vscode/
-!.vscode/settings.json
-!.vscode/extensions.json
 .idea/
-*.swp
-*.swo
-
-# AI Assistant workspaces
-.cursorignore
-.claudeignore

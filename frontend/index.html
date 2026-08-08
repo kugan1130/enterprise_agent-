@@ -4,180 +4,460 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Enterprise Multi-Agent AI Assistant</title>
-    <!-- Google Fonts -->
+    <!-- Fonts & Icons -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <!-- Font Awesome Icons -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <!-- Chart.js & Marked.js -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    
+    <!-- React 18, React-DOM, Babel Standalone & Marked -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <link rel="stylesheet" href="/static/styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <style>
+        :root {
+            --bg-dark: #0f172a;
+            --bg-card: #1e293b;
+            --bg-sidebar: #0f172a;
+            --primary: #6366f1;
+            --primary-hover: #4f46e5;
+            --primary-light: rgba(99, 102, 241, 0.15);
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --text-dim: #64748b;
+            --success: #10b981;
+            --success-bg: rgba(16, 185, 129, 0.15);
+            --error: #f43f5e;
+            --error-bg: rgba(244, 63, 94, 0.15);
+            --border-color: #334155;
+            --radius-sm: 8px;
+            --radius-md: 12px;
+            --radius-lg: 16px;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'Inter', sans-serif; background-color: var(--bg-dark); color: var(--text-main); height: 100vh; overflow: hidden; }
+        .hidden { display: none !important; }
+
+        /* AUTH MODAL */
+        .auth-modal-overlay { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(15, 23, 42, 0.85); backdrop-filter: blur(12px); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+        .auth-card { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-lg); width: 420px; max-width: 90vw; padding: 32px; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5); }
+        .auth-header { text-align: center; margin-bottom: 24px; }
+        .auth-logo { width: 56px; height: 56px; background: var(--primary-light); color: var(--primary); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 24px; margin: 0 auto 16px; }
+        .auth-header h2 { font-size: 22px; font-weight: 700; margin-bottom: 6px; }
+        .auth-header p { color: var(--text-muted); font-size: 14px; }
+        .auth-tabs { display: flex; background: var(--bg-dark); padding: 4px; border-radius: var(--radius-sm); margin-bottom: 20px; }
+        .tab-btn { flex: 1; background: transparent; border: none; color: var(--text-muted); padding: 10px; font-size: 14px; font-weight: 600; border-radius: 6px; cursor: pointer; transition: all 0.2s ease; }
+        .tab-btn.active { background: var(--primary); color: #ffffff; }
+        .auth-form { display: flex; flex-direction: column; gap: 16px; }
+        .input-group { display: flex; flex-direction: column; gap: 6px; }
+        .input-group label { font-size: 13px; font-weight: 500; color: var(--text-muted); }
+        .input-wrapper { position: relative; display: flex; align-items: center; }
+        .input-wrapper i { position: absolute; left: 14px; color: var(--text-dim); }
+        .input-wrapper input { width: 100%; background: var(--bg-dark); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 12px 14px 12px 40px; color: var(--text-main); font-size: 14px; outline: none; }
+        .input-wrapper input:focus { border-color: var(--primary); }
+        .error-banner { padding: 12px 14px; border-radius: var(--radius-sm); font-size: 13px; background: var(--error-bg); color: var(--error); border: 1px solid rgba(244, 63, 94, 0.3); }
+        .success-banner { padding: 12px 14px; border-radius: var(--radius-sm); font-size: 13px; background: var(--success-bg); color: var(--success); border: 1px solid rgba(16, 185, 129, 0.3); }
+        .primary-btn { background: var(--primary); color: #ffffff; border: none; padding: 12px 20px; border-radius: var(--radius-sm); font-size: 14px; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; }
+        .primary-btn:hover { background: var(--primary-hover); }
+        .primary-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+        .full-width { width: 100%; }
+
+        /* APP LAYOUT */
+        .app-layout { display: flex; width: 100vw; height: 100vh; }
+        .sidebar { width: 280px; background: var(--bg-sidebar); border-right: 1px solid var(--border-color); display: flex; flex-direction: column; padding: 20px; gap: 20px; }
+        .sidebar-brand { display: flex; align-items: center; gap: 12px; }
+        .brand-logo { width: 40px; height: 40px; background: var(--primary); border-radius: var(--radius-sm); display: flex; align-items: center; justify-content: center; font-size: 20px; color: #ffffff; }
+        .brand-info h3 { font-size: 16px; font-weight: 700; }
+        .brand-info span { font-size: 12px; color: var(--text-muted); }
+        .user-profile-badge { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 12px; display: flex; align-items: center; gap: 12px; }
+        .user-avatar { width: 36px; height: 36px; background: var(--primary-light); color: var(--primary); border-radius: 50%; display: flex; align-items: center; justify-content: center; }
+        .user-details { display: flex; flex-direction: column; overflow: hidden; }
+        .user-name { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .user-role { font-size: 11px; color: var(--primary); font-weight: 700; }
+        .new-chat-btn { background: var(--primary-light); color: var(--primary); border: 1px dashed var(--primary); padding: 10px; border-radius: var(--radius-sm); font-size: 14px; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; }
+        .new-chat-btn:hover { background: var(--primary); color: #ffffff; }
+        .sidebar-section { flex: 1; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
+        .section-title { font-size: 13px; font-weight: 600; color: var(--text-muted); display: flex; align-items: center; gap: 8px; }
+        .upload-dropzone { border: 2px dashed var(--border-color); border-radius: var(--radius-md); padding: 20px 16px; text-align: center; cursor: pointer; }
+        .upload-dropzone:hover { border-color: var(--primary); background: var(--primary-light); }
+        .upload-icon { font-size: 24px; color: var(--primary); margin-bottom: 8px; }
+        .upload-dropzone p { font-size: 13px; font-weight: 500; }
+        .upload-dropzone p span { color: var(--primary); text-decoration: underline; }
+        .upload-status-banner { background: var(--primary-light); border: 1px solid var(--primary); padding: 10px 12px; border-radius: var(--radius-sm); font-size: 12px; color: var(--primary); display: flex; align-items: center; gap: 8px; }
+        .spinner-small { width: 14px; height: 14px; border: 2px solid var(--primary); border-top-color: transparent; border-radius: 50%; animation: spin 0.8s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .doc-list-header { font-size: 12px; font-weight: 600; color: var(--text-dim); margin-top: 8px; }
+        .doc-list { display: flex; flex-direction: column; gap: 6px; }
+        .doc-item { background: var(--bg-card); padding: 8px 10px; border-radius: 6px; font-size: 12px; display: flex; align-items: center; gap: 8px; border: 1px solid var(--border-color); }
+        .logout-btn { background: transparent; border: 1px solid var(--border-color); color: var(--text-muted); padding: 10px; width: 100%; border-radius: var(--radius-sm); font-size: 13px; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; }
+        .logout-btn:hover { background: var(--error-bg); color: var(--error); border-color: var(--error); }
+
+        /* CHAT VIEWPORT */
+        .chat-viewport { flex: 1; display: flex; flex-direction: column; background: var(--bg-dark); }
+        .chat-header { height: 60px; border-bottom: 1px solid var(--border-color); padding: 0 24px; display: flex; align-items: center; justify-content: space-between; }
+        .header-status { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-muted); }
+        .status-indicator.online { width: 8px; height: 8px; background: var(--success); border-radius: 50%; }
+        .header-badges { display: flex; gap: 8px; }
+        .badge { background: var(--bg-card); border: 1px solid var(--border-color); padding: 4px 10px; border-radius: 20px; font-size: 11px; color: var(--text-muted); }
+        .activity-panel { background: #111827; border-bottom: 1px solid var(--border-color); padding: 12px 24px; display: flex; flex-direction: column; gap: 8px; }
+        .activity-header { display: flex; justify-content: space-between; align-items: center; font-size: 12px; font-weight: 600; color: var(--primary); }
+        .activity-steps { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; }
+        .step-chip { background: var(--bg-card); border: 1px solid var(--border-color); padding: 4px 10px; border-radius: 12px; font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+        .step-chip.active { border-color: var(--primary); color: var(--text-main); }
+        .chat-messages { flex: 1; overflow-y: auto; padding: 24px; display: flex; flex-direction: column; gap: 20px; }
+        .welcome-card { max-width: 600px; margin: 40px auto; text-align: center; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-lg); padding: 32px; }
+        .welcome-icon { font-size: 40px; color: var(--primary); margin-bottom: 16px; }
+        .welcome-card h2 { font-size: 22px; margin-bottom: 8px; }
+        .welcome-card p { color: var(--text-muted); font-size: 14px; line-height: 1.5; margin-bottom: 24px; }
+        .quick-prompts { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
+        .quick-prompts button { background: var(--bg-dark); border: 1px solid var(--border-color); color: var(--text-main); padding: 8px 14px; border-radius: 20px; font-size: 12px; cursor: pointer; }
+        .quick-prompts button:hover { border-color: var(--primary); color: var(--primary); }
+        .message-row { display: flex; gap: 14px; max-width: 85%; }
+        .message-row.user-row { align-self: flex-end; flex-direction: row-reverse; }
+        .message-row.assistant-row { align-self: flex-start; }
+        .avatar { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; flex-shrink: 0; }
+        .user-row .avatar { background: var(--primary); color: #ffffff; }
+        .assistant-row .avatar { background: #0284c7; color: #ffffff; }
+        .bubble { background: var(--bg-card); border: 1px solid var(--border-color); padding: 14px 18px; border-radius: var(--radius-md); font-size: 14px; line-height: 1.6; }
+        .user-row .bubble { background: var(--primary); border: none; color: #ffffff; }
+        .route-badge { display: inline-block; background: var(--primary-light); color: var(--primary); font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 10px; margin-bottom: 8px; }
+        .chat-input-container { padding: 16px 24px; border-top: 1px solid var(--border-color); background: var(--bg-dark); }
+        .input-form { display: flex; gap: 12px; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 8px 12px; }
+        .input-form textarea { flex: 1; background: transparent; border: none; color: var(--text-main); font-size: 14px; outline: none; resize: none; font-family: inherit; padding: 8px 0; }
+        .send-btn { background: var(--primary); color: #ffffff; border: none; width: 36px; height: 36px; border-radius: 8px; cursor: pointer; display: flex; align-items: center; justify-content: center; align-self: flex-end; }
+        .input-footer { text-align: center; margin-top: 8px; font-size: 11px; color: var(--text-dim); }
+    </style>
 </head>
 <body>
-    <!-- AUTH MODAL OVERLAY -->
-    <div id="auth-modal" class="modal-overlay">
-        <div class="auth-card">
-            <div class="auth-header">
-                <div class="brand-logo"><i class="fa-solid fa-brain-circuit"></i></div>
-                <h2>NexaAI Enterprise Assistant</h2>
-                <p>Multi-Agent Autonomous Intelligence System</p>
-            </div>
-            
-            <div class="auth-tabs">
-                <button id="tab-login" class="tab-btn active" onclick="switchAuthTab('login')">Sign In</button>
-                <button id="tab-register" class="tab-btn" onclick="switchAuthTab('register')">Register</button>
-            </div>
+    <div id="root"></div>
 
-            <!-- Login Form -->
-            <form id="form-login" class="auth-form active" onsubmit="handleLogin(event)">
-                <div class="form-group">
-                    <label><i class="fa-solid fa-user"></i> Username</label>
-                    <input type="text" id="login-username" placeholder="Enter your username" required>
-                </div>
-                <div class="form-group">
-                    <label><i class="fa-solid fa-lock"></i> Password</label>
-                    <input type="password" id="login-password" placeholder="Enter password" required>
-                </div>
-                <div id="login-error" class="auth-error hidden"></div>
-                <button type="submit" class="primary-btn full-btn">Sign In to Assistant</button>
-            </form>
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+        const API_BASE_URL = window.location.origin;
 
-            <!-- Register Form -->
-            <form id="form-register" class="auth-form" onsubmit="handleRegister(event)">
-                <div class="form-group">
-                    <label><i class="fa-solid fa-user"></i> Username</label>
-                    <input type="text" id="reg-username" placeholder="Choose username" required>
-                </div>
-                <div class="form-group">
-                    <label><i class="fa-solid fa-envelope"></i> Email Address</label>
-                    <input type="email" id="reg-email" placeholder="user@nexa.com" required>
-                </div>
-                <div class="form-group">
-                    <label><i class="fa-solid fa-lock"></i> Password</label>
-                    <input type="password" id="reg-password" placeholder="Choose password (min 6 chars)" required>
-                </div>
-                <div class="form-group">
-                    <label><i class="fa-solid fa-user-shield"></i> Role</label>
-                    <select id="reg-role">
-                        <option value="user">User</option>
-                        <option value="admin">Admin</option>
-                    </select>
-                </div>
-                <div id="reg-error" class="auth-error hidden"></div>
-                <button type="submit" class="primary-btn full-btn">Create Account</button>
-            </form>
-        </div>
-    </div>
+        function App() {
+            const [token, setToken] = useState(localStorage.getItem("nexa_token") || "");
+            const [user, setUser] = useState(JSON.parse(localStorage.getItem("nexa_user") || "null"));
+            const [activeTab, setActiveTab] = useState("login");
+            const [username, setUsername] = useState("");
+            const [email, setEmail] = useState("");
+            const [password, setPassword] = useState("");
+            const [error, setError] = useState(null);
+            const [successMsg, setSuccessMsg] = useState(null);
+            const [loading, setLoading] = useState(false);
 
-    <!-- MAIN APP WRAPPER -->
-    <div id="app-container" class="app-layout hidden">
-        <!-- SIDEBAR -->
-        <aside class="sidebar">
-            <div class="sidebar-brand">
-                <i class="fa-solid fa-brain-circuit brand-icon"></i>
-                <div class="brand-text">
-                    <span class="brand-name">NexaAI Enterprise</span>
-                    <span class="brand-sub">Multi-Agent Assistant</span>
-                </div>
-            </div>
+            const [sessionId, setSessionId] = useState("session_" + Math.floor(Math.random() * 1000000));
+            const [messages, setMessages] = useState([]);
+            const [documents, setDocuments] = useState([]);
+            const [activitySteps, setActivitySteps] = useState([]);
+            const [isSending, setIsSending] = useState(false);
+            const [uploadStatus, setUploadStatus] = useState(null);
+            const [inputMessage, setInputMessage] = useState("");
+            const fileInputRef = useRef(null);
+            const chatCanvasRef = useRef(null);
 
-            <button class="new-chat-btn" onclick="startNewSession()">
-                <i class="fa-solid fa-plus"></i> New Chat Session
-            </button>
+            useEffect(() => {
+                if (token && user) fetchDocs();
+            }, [token]);
 
-            <!-- DOCUMENT UPLOAD SECTION -->
-            <div class="sidebar-section">
-                <h3><i class="fa-solid fa-file-pdf"></i> Enterprise Documents</h3>
-                <div class="upload-box" onclick="triggerFileInput()" ondragover="handleDragOver(event)" ondrop="handleDrop(event)">
-                    <i class="fa-solid fa-cloud-arrow-up upload-icon"></i>
-                    <p>Click or drag PDF to upload</p>
-                    <span class="upload-sub">Auto-ingested for RAG Search</span>
-                    <input type="file" id="pdf-file-input" accept="application/pdf" style="display:none;" onchange="handleFileSelected(event)">
-                </div>
-                <div id="upload-status" class="upload-status hidden">
-                    <div class="status-spinner"><i class="fa-solid fa-spinner fa-spin"></i></div>
-                    <span id="upload-status-text">Uploading PDF...</span>
-                </div>
-                <div id="doc-list" class="doc-list">
-                    <!-- Populated dynamically -->
-                </div>
-            </div>
+            useEffect(() => {
+                if (chatCanvasRef.current) {
+                    chatCanvasRef.current.scrollTop = chatCanvasRef.current.scrollHeight;
+                }
+            }, [messages]);
 
-            <!-- USER FOOTER -->
-            <div class="sidebar-footer">
-                <div class="user-badge">
-                    <div class="user-avatar"><i class="fa-solid fa-user-tie"></i></div>
-                    <div class="user-info">
-                        <span id="user-name-display" class="user-name">User</span>
-                        <span id="user-role-display" class="user-role-badge">USER</span>
+            const fetchDocs = async () => {
+                try {
+                    const res = await fetch(`${API_BASE_URL}/api/documents`, {
+                        headers: { Authorization: `Bearer ${token}` }
+                    });
+                    if (res.ok) setDocuments(await res.json());
+                } catch (e) {}
+            };
+
+            const handleLogin = async (e) => {
+                e.preventDefault();
+                setError(null);
+                setLoading(true);
+                try {
+                    const res = await fetch(`${API_BASE_URL}/api/auth/login`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ username, password })
+                    });
+                    const data = await res.json();
+                    if (!res.ok) throw new Error(data.error?.message || data.detail || "Unable to sign in.");
+                    setToken(data.access_token);
+                    setUser(data.user);
+                    localStorage.setItem("nexa_token", data.access_token);
+                    localStorage.setItem("nexa_user", JSON.stringify(data.user));
+                } catch (err) {
+                    setError(err.message);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const handleRegister = async (e) => {
+                e.preventDefault();
+                setError(null);
+                setLoading(true);
+                try {
+                    const res = await fetch(`${API_BASE_URL}/api/auth/register`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ username, email, password, role: "user" })
+                    });
+                    const data = await res.json();
+                    if (!res.ok) throw new Error(data.error?.message || data.detail || "Registration failed.");
+                    setSuccessMsg("Account created successfully! Redirecting to sign in...");
+                    setTimeout(() => {
+                        setSuccessMsg(null);
+                        setActiveTab("login");
+                    }, 1500);
+                } catch (err) {
+                    setError(err.message);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const handleLogout = () => {
+                localStorage.removeItem("nexa_token");
+                localStorage.removeItem("nexa_user");
+                setToken("");
+                setUser(null);
+            };
+
+            const handleUploadPDF = async (file) => {
+                if (!file || file.type !== "application/pdf") return alert("Only PDF files allowed.");
+                setUploadStatus(`Uploading ${file.name}...`);
+                const formData = new FormData();
+                formData.append("file", file);
+                try {
+                    setUploadStatus("Indexing & extracting document chunks...");
+                    const res = await fetch(`${API_BASE_URL}/api/documents/upload`, {
+                        method: "POST",
+                        headers: { Authorization: `Bearer ${token}` },
+                        body: formData
+                    });
+                    const data = await res.json();
+                    if (!res.ok) throw new Error(data.error?.message || data.detail || "Ingestion failed.");
+                    setUploadStatus(`${file.name} is ready! You can now ask questions about it.`);
+                    setTimeout(() => setUploadStatus(null), 4000);
+                    fetchDocs();
+                } catch (err) {
+                    setUploadStatus(`Notice: ${err.message}`);
+                    setTimeout(() => setUploadStatus(null), 5000);
+                }
+            };
+
+            const handleSendMessage = async (msgText) => {
+                const text = msgText || inputMessage;
+                if (!text.trim() || isSending) return;
+                setInputMessage("");
+
+                const userMsg = { id: Date.now(), role: "user", content: text };
+                const asstId = Date.now() + 1;
+                const asstMsg = { id: asstId, role: "assistant", content: "Assistant is thinking...", isStreaming: true };
+                
+                setMessages(prev => [...prev, userMsg, asstMsg]);
+                setIsSending(true);
+                setActivitySteps(["Evaluating request guardrails..."]);
+
+                try {
+                    const response = await fetch(`${API_BASE_URL}/api/chat/stream`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+                        body: JSON.stringify({ message: text, session_id: sessionId })
+                    });
+                    if (!response.ok) {
+                        const errData = await response.json().catch(() => ({ detail: "Unable to process message." }));
+                        throw new Error(errData.error?.message || errData.detail || `Server error (${response.status})`);
+                    }
+
+                    const reader = response.body.getReader();
+                    const decoder = new TextDecoder();
+                    let fullText = "";
+
+                    while (true) {
+                        const { done, value } = await reader.read();
+                        if (done) break;
+                        const chunkStr = decoder.decode(value);
+                        const lines = chunkStr.split("\n");
+
+                        for (const line of lines) {
+                            const trimmed = line.trim();
+                            if (trimmed.startsWith("data: ")) {
+                                try {
+                                    const payload = JSON.parse(trimmed.substring(6));
+                                    if (payload.event === "status") {
+                                        setActivitySteps(prev => [...prev, payload.message]);
+                                    } else if (payload.event === "route_selected") {
+                                        setActivitySteps(prev => [...prev, `Routed to '${payload.route.toUpperCase()}' Agent`]);
+                                        setMessages(prev => prev.map(m => m.id === asstId ? { ...m, route: payload.route } : m));
+                                    } else if (payload.event === "token") {
+                                        fullText += payload.chunk;
+                                        setMessages(prev => prev.map(m => m.id === asstId ? { ...m, content: fullText, isStreaming: false } : m));
+                                    } else if (payload.event === "completed") {
+                                        setActivitySteps(prev => [...prev, "Execution completed."]);
+                                        setMessages(prev => prev.map(m => m.id === asstId ? { ...m, content: payload.response || fullText, isStreaming: false } : m));
+                                    }
+                                } catch (e) {}
+                            }
+                        }
+                    }
+                } catch (err) {
+                    setMessages(prev => prev.map(m => m.id === asstId ? { ...m, content: `Notice: ${err.message}`, error: true } : m));
+                } finally {
+                    setIsSending(false);
+                }
+            };
+
+            if (!token || !user) {
+                return (
+                    <div className="auth-modal-overlay">
+                        <div className="auth-card">
+                            <div className="auth-header">
+                                <div className="auth-logo"><i className="fa-solid fa-robot"></i></div>
+                                <h2>Enterprise AI Assistant</h2>
+                                <p>Sign in or create an employee account</p>
+                            </div>
+                            <div className="auth-tabs">
+                                <button className={`tab-btn ${activeTab === "login" ? "active" : ""}`} onClick={() => { setActiveTab("login"); setError(null); }}>Sign In</button>
+                                <button className={`tab-btn ${activeTab === "register" ? "active" : ""}`} onClick={() => { setActiveTab("register"); setError(null); }}>Create Account</button>
+                            </div>
+
+                            {error && <div className="error-banner">{error}</div>}
+                            {successMsg && <div className="success-banner">{successMsg}</div>}
+
+                            {activeTab === "login" ? (
+                                <form className="auth-form" onSubmit={handleLogin}>
+                                    <div className="input-group">
+                                        <label>Username or Email</label>
+                                        <div className="input-wrapper"><i className="fa-solid fa-user"></i><input type="text" placeholder="Username" value={username} onChange={e=>setUsername(e.target.value)} required /></div>
+                                    </div>
+                                    <div className="input-group">
+                                        <label>Password</label>
+                                        <div className="input-wrapper"><i className="fa-solid fa-lock"></i><input type="password" placeholder="Password" value={password} onChange={e=>setPassword(e.target.value)} required /></div>
+                                    </div>
+                                    <button type="submit" className="primary-btn full-width" disabled={loading}>{loading ? "Signing In..." : "Sign In"}</button>
+                                </form>
+                            ) : (
+                                <form className="auth-form" onSubmit={handleRegister}>
+                                    <div className="input-group">
+                                        <label>Username</label>
+                                        <div className="input-wrapper"><i className="fa-solid fa-user"></i><input type="text" placeholder="Username" value={username} onChange={e=>setUsername(e.target.value)} required /></div>
+                                    </div>
+                                    <div className="input-group">
+                                        <label>Work Email</label>
+                                        <div className="input-wrapper"><i className="fa-solid fa-envelope"></i><input type="email" placeholder="Email" value={email} onChange={e=>setEmail(e.target.value)} required /></div>
+                                    </div>
+                                    <div className="input-group">
+                                        <label>Password</label>
+                                        <div className="input-wrapper"><i className="fa-solid fa-lock"></i><input type="password" placeholder="Password" value={password} onChange={e=>setPassword(e.target.value)} required minLength="6" /></div>
+                                    </div>
+                                    <button type="submit" className="primary-btn full-width" disabled={loading}>{loading ? "Creating..." : "Create Account"}</button>
+                                </form>
+                            )}
+                        </div>
                     </div>
-                </div>
-                <button class="logout-btn" onclick="handleLogout()" title="Log out">
-                    <i class="fa-solid fa-right-from-bracket"></i>
-                </button>
-            </div>
-        </aside>
+                );
+            }
 
-        <!-- CHAT MAIN CONTENT -->
-        <main class="chat-main">
-            <!-- TOP NAVBAR -->
-            <header class="top-nav">
-                <div class="nav-session">
-                    <i class="fa-solid fa-comments"></i>
-                    <span>Session ID: <strong id="active-session-id">default_session</strong></span>
-                </div>
-                <div class="nav-badges">
-                    <span class="status-tag"><i class="fa-solid fa-shield-halved"></i> Guardrails Active</span>
-                    <span class="status-tag"><i class="fa-solid fa-bolt"></i> LangGraph Multi-Agent</span>
-                </div>
-            </header>
-
-            <!-- AGENT ACTIVITY STREAM PANEL -->
-            <div id="agent-activity-panel" class="activity-panel hidden">
-                <div class="activity-header">
-                    <span><i class="fa-solid fa-microchip fa-spin"></i> Real-Time Agent Execution Progress</span>
-                    <button class="close-activity-btn" onclick="hideActivityPanel()"><i class="fa-solid fa-xmark"></i></button>
-                </div>
-                <div id="activity-steps" class="activity-steps">
-                    <!-- Step events appended live -->
-                </div>
-            </div>
-
-            <!-- CHAT MESSAGES CANVAS -->
-            <div id="chat-messages" class="chat-messages">
-                <!-- Welcome Card -->
-                <div class="welcome-card">
-                    <div class="welcome-icon"><i class="fa-solid fa-robot"></i></div>
-                    <h2>Welcome to NexaAI Assistant</h2>
-                    <p>Your enterprise multi-agent assistant with specialized capabilities:</p>
-                    <div class="capability-grid">
-                        <div class="cap-card"><i class="fa-solid fa-database"></i> <strong>SQL Analytics</strong> PostgreSQL queries with chart generation</div>
-                        <div class="cap-card"><i class="fa-solid fa-file-contract"></i> <strong>RAG Search</strong> Enterprise PDFs & ChromaDB vector context</div>
-                        <div class="cap-card"><i class="fa-solid fa-globe"></i> <strong>Web Research</strong> Tavily live search synthesis</div>
-                        <div class="cap-card"><i class="fa-solid fa-diagram-project"></i> <strong>Deep Research</strong> Planner, Parallel Agent & Report synthesis</div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- CHAT INPUT AREA -->
-            <div class="chat-input-container">
-                <form id="chat-form" class="chat-form" onsubmit="handleSendMessage(event)">
-                    <div class="input-wrapper">
-                        <textarea id="chat-input" placeholder="Ask a question, query SQL sales data, search documents, or request deep research..." rows="1" onkeydown="handleKeyPress(event)"></textarea>
-                        <button type="submit" id="send-btn" class="send-btn">
-                            <i class="fa-solid fa-paper-plane"></i>
+            return (
+                <div className="app-layout">
+                    <aside className="sidebar">
+                        <div className="sidebar-brand">
+                            <div className="brand-logo"><i class="fa-solid fa-brain"></i></div>
+                            <div className="brand-info"><h3>Nexa AI</h3><span>Enterprise Assistant</span></div>
+                        </div>
+                        <div className="user-profile-badge">
+                            <div className="user-avatar"><i className="fa-solid fa-user-shield"></i></div>
+                            <div className="user-details"><span className="user-name">{user.username}</span><span className="user-role">{user.role.toUpperCase()}</span></div>
+                        </div>
+                        <button className="new-chat-btn" onClick={() => { setMessages([]); setSessionId("session_" + Math.floor(Math.random() * 1000000)); }}>
+                            <i className="fa-solid fa-plus"></i> New Conversation
                         </button>
-                    </div>
-                </form>
-                <div class="input-footer">
-                    <span>Press Enter to send. Streaming SSE & Guardrails active.</span>
-                </div>
-            </div>
-        </main>
-    </div>
+                        <div className="sidebar-section">
+                            <div className="section-title"><i className="fa-solid fa-file-pdf"></i> Document Ingestion</div>
+                            <div className="upload-dropzone" onClick={() => fileInputRef.current?.click()}>
+                                <i className="fa-solid fa-cloud-arrow-up upload-icon"></i>
+                                <p>Drop PDF or <span>Browse</span></p>
+                                <small>Auto-indexed into Vector DB</small>
+                                <input type="file" ref={fileInputRef} accept="application/pdf" className="hidden" onChange={e => e.target.files[0] && handleUploadPDF(e.target.files[0])} />
+                            </div>
+                            {uploadStatus && <div className="upload-status-banner"><div className="spinner-small"></div><span>{uploadStatus}</span></div>}
+                            <div className="doc-list-header">Indexed Documents ({documents.length})</div>
+                            <div className="doc-list">
+                                {documents.map(d => (
+                                    <div key={d.document_id} className="doc-item">
+                                        <i className="fa-solid fa-file-pdf" style={{ color: "#ef4444" }}></i>
+                                        <span>{d.filename}</span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                        <div className="sidebar-footer">
+                            <button className="logout-btn" onClick={handleLogout}><i className="fa-solid fa-right-from-bracket"></i> Sign Out</button>
+                        </div>
+                    </aside>
 
-    <script src="/static/app.js"></script>
+                    <main className="chat-viewport">
+                        <header className="chat-header">
+                            <div className="header-status"><span className="status-indicator online"></span><span>Session: <strong>{sessionId}</strong></span></div>
+                            <div className="header-badges"><span className="badge">Groq Llama 3.3 70B</span><span className="badge">ChromaDB RAG</span><span className="badge">PostgreSQL SQL</span></div>
+                        </header>
+
+                        {activitySteps.length > 0 && (
+                            <div className="activity-panel">
+                                <div className="activity-header"><span><i className="fa-solid fa-network-wired"></i> Agent Pipeline</span><button className="close-panel-btn" onClick={() => setActivitySteps([])}>&times;</button></div>
+                                <div className="activity-steps">{activitySteps.map((s, i) => <div key={i} className="step-chip active"><i className="fa-solid fa-check"></i> {s}</div>)}</div>
+                            </div>
+                        )}
+
+                        <div className="chat-messages" ref={chatCanvasRef}>
+                            {messages.length === 0 ? (
+                                <div className="welcome-card">
+                                    <div className="welcome-icon"><i className="fa-solid fa-robot"></i></div>
+                                    <h2>Welcome to Enterprise AI Assistant</h2>
+                                    <p>Ask company policy questions, search the web, query SQL sales databases, or upload PDFs for auto-ingested RAG analysis.</p>
+                                    <div className="quick-prompts">
+                                        <button onClick={() => handleSendMessage("What is our company remote work policy?")}>Company Policy</button>
+                                        <button onClick={() => handleSendMessage("What is total sales revenue by region?")}>SQL Revenue</button>
+                                        <button onClick={() => handleSendMessage("Analyze Q1 sales and compare with recent AI developments.")}>Research Report</button>
+                                    </div>
+                                </div>
+                            ) : (
+                                messages.map(m => (
+                                    <div key={m.id} className={`message-row ${m.role === "user" ? "user-row" : "assistant-row"}`}>
+                                        <div className="avatar"><i className={m.role === "user" ? "fa-solid fa-user" : "fa-solid fa-bot"}></i></div>
+                                        <div className="bubble">
+                                            {m.route && <div className="route-badge">ROUTE: {m.route.toUpperCase()}</div>}
+                                            <div dangerouslySetInnerHTML={{ __html: typeof marked !== "undefined" ? marked.parse(m.content) : m.content }} />
+                                        </div>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+
+                        <div className="chat-input-container">
+                            <form className="input-form" onSubmit={e => { e.preventDefault(); handleSendMessage(); }}>
+                                <textarea value={inputMessage} onChange={e => setInputMessage(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSendMessage(); } }} placeholder="Type a message or question..." rows="1" disabled={isSending} />
+                                <button type="submit" className="send-btn" disabled={isSending || !inputMessage.trim()}><i className="fa-solid fa-paper-plane"></i></button>
+                            </form>
+                            <div className="input-footer"><span>Protected by Enterprise Guardrails & SQL Read-Only Validation</span></div>
+                        </div>
+                    </main>
+                </div>
+            );
+        }
+
+        ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+    </script>
 </body>
 </html>

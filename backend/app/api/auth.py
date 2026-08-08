@@ -25,7 +25,7 @@ class UserRegisterRequest(BaseModel):
     username: str = Field(..., min_length=3, max_length=50)
     email: EmailStr
     password: str = Field(..., min_length=6)
-    role: str = Field(default="user", description="Role: 'user' or 'admin'")
+    role: str = Field(default="user", description="Role defaults to 'user' for normal registration.")
 
 
 class UserLoginRequest(BaseModel):
@@ -78,19 +78,31 @@ def require_admin_user(current_user: Annotated[User, Depends(get_current_user)])
 
 @router.post("/register", response_model=TokenResponse)
 def register(payload: UserRegisterRequest, db: Session = Depends(get_db)):
-    """Registers a new user account."""
-    existing_user = db.query(User).filter((User.username == payload.username) | (User.email == payload.email)).first()
+    """Registers a new user account (strictly defaults to 'user' role with email validation)."""
+    import re
+    email_clean = payload.email.strip().lower()
+    email_regex = re.compile(r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$")
+    if not email_regex.match(email_clean):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Please enter a valid work or Gmail address (e.g., user@gmail.com).",
+        )
+
+    existing_user = db.query(User).filter((User.username == payload.username) | (User.email == email_clean)).first()
     if existing_user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Username or Email already registered.",
+            detail="Username or Email is already registered.",
         )
+
+    # Force normal registration to default to 'user' role for security
+    assigned_role = "user"
 
     new_user = User(
         username=payload.username,
         email=payload.email,
         hashed_password=hash_password(payload.password),
-        role=payload.role if payload.role in ("user", "admin") else "user",
+        role=assigned_role,
     )
     db.add(new_user)
     db.commit()
@@ -106,11 +118,11 @@ def register(payload: UserRegisterRequest, db: Session = Depends(get_db)):
 @router.post("/login", response_model=TokenResponse)
 def login(payload: UserLoginRequest, db: Session = Depends(get_db)):
     """Authenticates user credentials and returns access token."""
-    user = db.query(User).filter(User.username == payload.username).first()
+    user = db.query(User).filter((User.username == payload.username) | (User.email == payload.username)).first()
     if not user or not verify_password(payload.password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid username or password.",
+            detail="Invalid username/email or password.",
         )
 
     token = create_access_token({"sub": user.username, "role": user.role})
