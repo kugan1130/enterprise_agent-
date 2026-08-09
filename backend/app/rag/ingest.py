@@ -78,18 +78,9 @@ def ingest_pdf(
     content_hash = hashlib.sha256(pdf_path.read_bytes()).hexdigest()
     document_id = f"doc_{content_hash[:40]}"
     
-    # 1. Check PostgreSQL first to avoid duplicate processing
+    # Note: DocumentRecord is now created/committed by the upload controller *before* ingestion starts.
     existing = db.query(DocumentRecord).filter(DocumentRecord.document_id == document_id).first()
-    if existing:
-        if getattr(existing, "status", "indexed") == "indexed":
-            logger.info(f"Document {filename} already indexed. Skipping.")
-            return IngestionResult(document_id=document_id, chunk_count=existing.chunk_count or 0, skipped=True)
-        elif getattr(existing, "status", "indexed") == "processing":
-            logger.info(f"Document {filename} is currently processing. Skipping.")
-            return IngestionResult(document_id=document_id, chunk_count=0, skipped=True)
-    
-    # 2. Create PostgreSQL DocumentRecord FIRST (status=processing)
-    if existing is None:
+    if not existing:
         existing = DocumentRecord(
             document_id=document_id,
             filename=filename,
@@ -103,14 +94,12 @@ def ingest_pdf(
             status="processing"
         )
         db.add(existing)
-    else:
-        existing.status = "processing"
+        db.commit()
     
-    db.commit()
-
     try:
-        from backend.app.core.chroma import get_chroma_client
-        client = get_chroma_client(persist_path)
+        from backend.app.core.chroma import get_chroma_service
+        chroma_service = get_chroma_service(persist_path)
+        client = chroma_service.get_raw_client()
         collection = client.get_or_create_collection(name=collection_name, metadata={"hnsw:space": "cosine"})
         
         documents = []
@@ -163,6 +152,7 @@ def ingest_pdf(
                     "chunk_id": chunk_id,
                     "chunk_index": idx,
                     "page": chunk.metadata.get("page", 0),
+                    "source_type": "pdf"
                 }
             )
 
@@ -180,11 +170,17 @@ def ingest_pdf(
             metadatas=metadatas,
             embeddings=cast(List[Embedding], embed_passages(texts)),
         )
+        
+        # Verify ChromaDB insertion
+        inserted = collection.get(where={"document_id": document_id})["ids"]
+        if len(inserted) != len(texts):
+            raise RuntimeError(f"ChromaDB insertion mismatch: expected {len(texts)} but inserted {len(inserted)} chunks.")
 
         _prune_legacy_duplicates(collection, filename, set(ids))
         
         # Update PostgreSQL (status=indexed)
         existing.status = "indexed"
+        existing.rag_status = "indexed"
         existing.chunk_count = len(texts)
         db.commit()
         
@@ -205,6 +201,8 @@ def ingest_pdf(
     except Exception as err:
         logger.error(f"Ingestion failed for {filename}: {err}")
         existing.status = "failed"
+        existing.rag_status = "failed"
+        existing.error_message = str(err)
         db.commit()
         raise err
 

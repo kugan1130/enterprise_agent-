@@ -46,10 +46,17 @@ async def upload_pdf(
     
     existing = db.query(DocumentRecord).filter(DocumentRecord.document_id == document_id).first()
     if existing:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Document already uploaded/indexed."
-        )
+        if existing.status == "indexed":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Document already uploaded and indexed."
+            )
+        elif existing.status == "processing":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Document is already being processed."
+            )
+        # If failed, we allow reprocessing
 
     # Ensure storage directory exists
     storage_dir = settings.DATA_DIR
@@ -58,6 +65,37 @@ async def upload_pdf(
 
     with open(save_path, "wb") as f:
         f.write(content)
+
+    source_path = f"uploads/{Path(file.filename).name}"
+
+    if not existing:
+        from datetime import datetime
+        existing = DocumentRecord(
+            document_id=document_id,
+            filename=file.filename,
+            original_filename=file.filename,
+            safe_filename=save_path.name,
+            file_type="PDF",
+            file_size=len(content),
+            uploaded_by=current_user.username,
+            storage_path=str(save_path),
+            source_path=source_path,
+            content_hash=file_hash,
+            chunk_count=0,
+            status="processing",
+            rag_status="processing",
+            sql_status="not_applicable",
+            error_message=None,
+            user_id=current_user.id
+        )
+        db.add(existing)
+    else:
+        existing.status = "processing"
+        existing.rag_status = "processing"
+        existing.error_message = None
+        existing.storage_path = str(save_path)
+    
+    db.commit()
 
     try:
         result = ingest_pdf(
@@ -90,14 +128,87 @@ def list_documents(
     db: Session = Depends(get_db),
 ):
     """Returns list of uploaded documents."""
-    records = db.query(DocumentRecord).filter(DocumentRecord.status == "indexed").all()
+    records = db.query(DocumentRecord).all()
     return [
         {
-            "document_id": r.document_id,
+            "id": r.document_id,
+            "document_id": r.document_id, # for frontend UI compatibility
             "filename": r.filename,
+            "file_type": r.file_type or "PDF",
+            "status": r.status,
+            "rag_status": r.rag_status,
+            "sql_status": r.sql_status,
+            "chunk_count": r.chunk_count or 0,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
             "file_size": r.file_size,
             "uploaded_by": r.uploaded_by,
             "upload_timestamp": r.upload_timestamp.isoformat() if r.upload_timestamp else None,
         }
         for r in records
     ]
+
+@router.get("/{document_id}")
+def get_document(
+    document_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Returns a specific document record."""
+    record = db.query(DocumentRecord).filter(DocumentRecord.document_id == document_id).first()
+    if not record:
+        raise HTTPException(status_code=404, detail="Document not found.")
+    
+    return {
+        "id": record.document_id,
+        "filename": record.filename,
+        "file_type": record.file_type or "PDF",
+        "status": record.status,
+        "rag_status": record.rag_status,
+        "sql_status": record.sql_status,
+        "chunk_count": record.chunk_count or 0,
+        "created_at": record.created_at.isoformat() if record.created_at else None,
+    }
+
+@router.delete("/{document_id}")
+def delete_document(
+    document_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Deletes a document and its associated data."""
+    record = db.query(DocumentRecord).filter(DocumentRecord.document_id == document_id).first()
+    if not record:
+        raise HTTPException(status_code=404, detail="Document not found.")
+    
+    # 1. Delete ChromaDB vectors
+    from backend.app.core.chroma import get_chroma_service
+    try:
+        get_chroma_service().delete_document("enterprise_documents", document_id)
+    except Exception as e:
+        import logging
+        logging.getLogger("enterprise_ai").error(f"Failed to delete vectors for {document_id}: {e}")
+
+    # 2. Delete Physical File
+    if record.storage_path:
+        try:
+            p = Path(record.storage_path)
+            if p.exists():
+                p.unlink()
+        except Exception as e:
+            import logging
+            logging.getLogger("enterprise_ai").error(f"Failed to delete file for {document_id}: {e}")
+            
+    # 3. Optional: SQL Table Drop (if implemented for CSV/SQL)
+    if record.sql_table_name:
+        try:
+            from sqlalchemy import text
+            db.execute(text(f"DROP TABLE IF EXISTS {record.sql_table_name}"))
+        except Exception as e:
+            import logging
+            logging.getLogger("enterprise_ai").error(f"Failed to drop SQL table for {document_id}: {e}")
+
+    # 4. Delete Record
+    db.delete(record)
+    db.commit()
+    
+    return {"status": "success", "message": f"Document {document_id} deleted."}

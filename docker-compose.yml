@@ -7,7 +7,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      DATABASE_URL: postgresql://nexa_user:nexa_pass@postgres:5432/enterprise_ai_db
+      DATABASE_URL: postgresql://postgres:1234@postgres:5432/enterprise_ai_db
       REDIS_URL: redis://redis:6379/0
       LANGCHAIN_TRACING_V2: ${LANGCHAIN_TRACING_V2:-false}
       LANGCHAIN_API_KEY: ${LANGCHAIN_API_KEY:-}
@@ -26,15 +26,15 @@ services:
     image: postgres:15-alpine
     container_name: enterprise_ai_postgres
     environment:
-      POSTGRES_USER: nexa_user
-      POSTGRES_PASSWORD: nexa_pass
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 1234
       POSTGRES_DB: enterprise_ai_db
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U nexa_user -d enterprise_ai_db" ]
+      test: [ "CMD-SHELL", "pg_isready -U postgres -d enterprise_ai_db" ]
       interval: 5s
       timeout: 5s
       retries: 5

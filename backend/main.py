@@ -34,24 +34,22 @@ def _ensure_document_record_columns():
     required_columns = {
         "user_id": "INTEGER",
         "original_filename": "VARCHAR(255)",
-        "file_type": "VARCHAR(20)",
-        "storage_path": "VARCHAR(500)",
-        "source_path": "VARCHAR(500)",
-        "content_hash": "VARCHAR(64)",
-        "chunk_count": "INTEGER",
-        "status": "VARCHAR(20) DEFAULT 'indexed'",
-        "rag_status": "VARCHAR(20) DEFAULT 'not_applicable'",
-        "sql_status": "VARCHAR(20) DEFAULT 'not_applicable'",
-        "sql_table_name": "VARCHAR(255)",
+        "file_type": "VARCHAR(50)",
+        "storage_path": "VARCHAR(512)",
+        "rag_status": "VARCHAR(50)",
+        "sql_status": "VARCHAR(50)",
+        "sql_table_name": "VARCHAR(100)",
         "error_message": "TEXT",
-        "created_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
-        "updated_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+        "created_at": "TIMESTAMP",
+        "updated_at": "TIMESTAMP"
     }
     with engine.begin() as conn:
         existing_columns = {column["name"] for column in inspect(conn).get_columns("document_records")}
         for name, column_type in required_columns.items():
             if name not in existing_columns:
                 conn.execute(text(f"ALTER TABLE document_records ADD COLUMN {name} {column_type}"))
+                if name in ("created_at", "updated_at"):
+                    conn.execute(text(f"UPDATE document_records SET {name} = upload_timestamp WHERE {name} IS NULL"))
                 
         # Reconcile legacy documents that were just given the 'processing' default
         try:
