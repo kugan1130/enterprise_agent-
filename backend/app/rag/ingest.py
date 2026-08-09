@@ -63,8 +63,8 @@ def _extract_pdf_text_clean(pdf_path: Path) -> List[str]:
     return pages_text
 
 
-def ingest_pdf(
-    pdf_path: Path,
+def ingest_document_rag(
+    file_path: Path,
     *,
     db: Any,
     filename: str,
@@ -74,8 +74,8 @@ def ingest_pdf(
     persist_path: Path = DEFAULT_CHROMA_PATH,
     collection_name: str = COLLECTION_NAME,
 ) -> IngestionResult:
-    """The single ingestion path for filesystem and uploaded PDF documents."""
-    content_hash = hashlib.sha256(pdf_path.read_bytes()).hexdigest()
+    """The single ingestion path for filesystem and uploaded documents into RAG."""
+    content_hash = hashlib.sha256(file_path.read_bytes()).hexdigest()
     document_id = f"doc_{content_hash[:40]}"
     
     # Note: DocumentRecord is now created/committed by the upload controller *before* ingestion starts.
@@ -85,7 +85,7 @@ def ingest_pdf(
             document_id=document_id,
             filename=filename,
             safe_filename=safe_filename,
-            file_size=pdf_path.stat().st_size,
+            file_size=file_path.stat().st_size,
             uploaded_by=uploaded_by,
             upload_timestamp=datetime.utcnow(),
             source_path=source_path,
@@ -103,27 +103,56 @@ def ingest_pdf(
         collection = client.get_or_create_collection(name=collection_name, metadata={"hnsw:space": "cosine"})
         
         documents = []
-        try:
-            from langchain_community.document_loaders import PyPDFLoader
-            pdf_docs = PyPDFLoader(str(pdf_path)).load()
-            if pdf_docs:
-                documents = pdf_docs
-        except Exception:
-            pass
+        ext = file_path.suffix.lower()
+        from langchain_core.documents import Document
 
-        if not documents:
-            extracted_pages = _extract_pdf_text_clean(pdf_path)
-            from langchain_core.documents import Document
-            for page_idx, page_text in enumerate(extracted_pages):
+        if ext == ".pdf":
+            try:
+                from langchain_community.document_loaders import PyPDFLoader
+                pdf_docs = PyPDFLoader(str(file_path)).load()
+                if pdf_docs:
+                    documents = pdf_docs
+            except Exception:
+                pass
+
+            if not documents:
+                extracted_pages = _extract_pdf_text_clean(file_path)
+                for page_idx, page_text in enumerate(extracted_pages):
+                    documents.append(
+                        Document(
+                            page_content=page_text,
+                            metadata={"source": file_path.name, "page": page_idx},
+                        )
+                    )
+        elif ext == ".csv":
+            import csv
+            with open(file_path, "r", encoding="utf-8") as f:
+                reader = csv.reader(f)
+                try:
+                    headers = next(reader)
+                    for i, row in enumerate(reader):
+                        content = ", ".join(f"{h}: {v}" for h, v in zip(headers, row) if v.strip())
+                        if content:
+                            documents.append(
+                                Document(
+                                    page_content=content,
+                                    metadata={"source": file_path.name, "row": i},
+                                )
+                            )
+                except StopIteration:
+                    pass
+        elif ext == ".sql":
+            content = file_path.read_text(encoding="utf-8")
+            if content.strip():
                 documents.append(
                     Document(
-                        page_content=page_text,
-                        metadata={"source": pdf_path.name, "page": page_idx},
+                        page_content=content,
+                        metadata={"source": file_path.name},
                     )
                 )
 
         if not documents:
-            raise ValueError(f"No extractable text found in {pdf_path.name}.")
+            raise ValueError(f"No extractable text found in {file_path.name}.")
 
         chunks = RecursiveCharacterTextSplitter(
             chunk_size=800,
@@ -152,12 +181,12 @@ def ingest_pdf(
                     "chunk_id": chunk_id,
                     "chunk_index": idx,
                     "page": chunk.metadata.get("page", 0),
-                    "source_type": "pdf"
+                    "source_type": ext.lstrip(".")
                 }
             )
 
         if not texts:
-            raise ValueError(f"No non-empty text chunks found in {pdf_path.name}.")
+            raise ValueError(f"No non-empty text chunks found in {file_path.name}.")
 
         # Replace all prior chunks
         existing_chunks = collection.get(where={"document_id": document_id})["ids"]
@@ -222,7 +251,7 @@ def ingest_documents(documents_path: Path, *, db: Any = None, persist_path: Path
 
     total_chunks = 0
     for pdf_path in sorted(documents_path.glob("*.pdf")):
-        result = ingest_pdf(
+        result = ingest_document_rag(
             pdf_path,
             db=db,
             filename=pdf_path.name,

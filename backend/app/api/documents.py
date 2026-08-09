@@ -10,25 +10,30 @@ from sqlalchemy.orm import Session
 from backend.app.api.auth import get_current_user, get_db, require_admin_user
 from backend.app.core.config import settings
 from backend.app.models.user import DocumentRecord, User
-from backend.app.rag.ingest import ingest_pdf
+from backend.app.rag.ingest import ingest_document_rag
+from backend.app.services.sql_ingestion import ingest_csv_to_sql, ingest_sql_file_to_sql
 
 router = APIRouter(prefix="/api/documents", tags=["documents"])
 
 
 @router.post("/upload")
-async def upload_pdf(
+async def upload_document(
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """
-    Uploads and automatically ingests a PDF document into ChromaDB for RAG search.
-    Enforces file type, size limits, safe UUID naming, and automatic vector indexing.
+    Uploads and automatically ingests a document into ChromaDB for RAG search.
+    For structured data (.csv, .sql), also parallel-ingests into PostgreSQL.
     """
-    if not file.filename or not file.filename.lower().endswith(".pdf"):
+    if not file.filename:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No filename provided.")
+        
+    ext = Path(file.filename).suffix.lower()
+    if ext not in [".pdf", ".csv", ".sql"]:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid file type. Only PDF documents (.pdf) are allowed.",
+            detail="Invalid file type. Only .pdf, .csv, and .sql are allowed.",
         )
 
     content = await file.read()
@@ -61,12 +66,15 @@ async def upload_pdf(
     # Ensure storage directory exists
     storage_dir = settings.DATA_DIR
     storage_dir.mkdir(parents=True, exist_ok=True)
-    save_path = storage_dir / f"upload_{uuid.uuid4().hex}.pdf"
+    save_path = storage_dir / f"upload_{uuid.uuid4().hex}{ext}"
 
     with open(save_path, "wb") as f:
         f.write(content)
 
     source_path = f"uploads/{Path(file.filename).name}"
+    
+    file_type = "PDF" if ext == ".pdf" else "CSV" if ext == ".csv" else "SQL"
+    is_structured = ext in [".csv", ".sql"]
 
     if not existing:
         from datetime import datetime
@@ -75,7 +83,7 @@ async def upload_pdf(
             filename=file.filename,
             original_filename=file.filename,
             safe_filename=save_path.name,
-            file_type="PDF",
+            file_type=file_type,
             file_size=len(content),
             uploaded_by=current_user.username,
             storage_path=str(save_path),
@@ -84,7 +92,7 @@ async def upload_pdf(
             chunk_count=0,
             status="processing",
             rag_status="processing",
-            sql_status="not_applicable",
+            sql_status="processing" if is_structured else "not_applicable",
             error_message=None,
             user_id=current_user.id
         )
@@ -92,13 +100,21 @@ async def upload_pdf(
     else:
         existing.status = "processing"
         existing.rag_status = "processing"
+        if is_structured:
+            existing.sql_status = "processing"
         existing.error_message = None
         existing.storage_path = str(save_path)
     
     db.commit()
 
+    rag_error = None
+    sql_error = None
+    chunk_count = 0
+    skipped_rag = False
+
+    # 1. RAG Pipeline
     try:
-        result = ingest_pdf(
+        result = ingest_document_rag(
             save_path,
             db=db,
             filename=file.filename,
@@ -106,19 +122,49 @@ async def upload_pdf(
             uploaded_by=current_user.username,
             source_path=f"uploads/{Path(file.filename).name}",
         )
+        chunk_count = result.chunk_count
+        skipped_rag = result.skipped
     except Exception as err:
+        rag_error = str(err)
+        
+    # 2. SQL Pipeline (if structured)
+    if is_structured:
+        try:
+            if ext == ".csv":
+                table_name = ingest_csv_to_sql(save_path, file.filename)
+                existing.sql_table_name = table_name
+            elif ext == ".sql":
+                table_name = ingest_sql_file_to_sql(save_path, file.filename)
+                existing.sql_table_name = table_name
+            
+            existing.sql_status = "indexed"
+        except Exception as err:
+            sql_error = str(err)
+            existing.sql_status = "failed"
+            
+    # Finalize status based on dual pipelines
+    if rag_error and (sql_error or not is_structured):
+        # Both failed, or RAG failed and no SQL was attempted
+        existing.status = "failed"
+        existing.error_message = f"RAG Error: {rag_error}" + (f" | SQL Error: {sql_error}" if sql_error else "")
+        db.commit()
         save_path.unlink(missing_ok=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Unable to process and index PDF: {err}",
+            detail=f"Ingestion failed completely: {existing.error_message}",
         )
+    else:
+        # At least one pipeline succeeded
+        existing.status = "indexed"
+        existing.error_message = f"Partial failure: RAG({rag_error}) SQL({sql_error})" if (rag_error or sql_error) else None
+        db.commit()
 
     return {
-        "document_id": result.document_id,
+        "document_id": document_id,
         "filename": file.filename,
-        "chunks_ingested": result.chunk_count,
-        "status": "already_ingested" if result.skipped else "ingested",
-        "message": f"{file.filename} is ready. You can now ask questions about it.",
+        "chunks_ingested": chunk_count,
+        "status": "already_ingested" if skipped_rag else "ingested",
+        "message": f"{file.filename} is ready. RAG: {'Failed' if rag_error else 'OK'}, SQL: {'Failed' if sql_error else 'OK' if is_structured else 'N/A'}",
     }
 
 
