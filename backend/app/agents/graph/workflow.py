@@ -55,93 +55,77 @@ def create_workflow(llm_client: LLMClient):
         return await dispatch_task(state, llm_client)
 
     async def llm_node(state: GraphState) -> Dict[str, Any]:
-        user_message = state.get("user_message", "")
+        user_message = state.get("current_query") or state.get("user_message", "")
         session_id = state.get("session_id", "default_session")
         history = state.get("history", "")
-        web_results = state.get("web_results")
-        rag_context = state.get("rag_context")
-        sql_result_raw = state.get("sql_result")
         
-        tool_called = state.get("tool_called", False)
-        tool_success = state.get("tool_success", False)
+        # Unify agent results whether from Planner or single route
+        agent_results = state.get("agent_results", [])
+        if not agent_results:
+            # Reconstruct agent_results from single route for unified processing
+            if "web_results" in state:
+                agent_results.append({
+                    "route": "WEB",
+                    "tool_called": state.get("tool_called", True),
+                    "tool_success": state.get("tool_success", False),
+                    "source": state.get("source", "Web"),
+                    "result": str(state.get("web_results", ""))
+                })
+            elif "rag_context" in state:
+                agent_results.append({
+                    "route": "RAG",
+                    "tool_called": state.get("tool_called", True),
+                    "tool_success": state.get("tool_success", False),
+                    "source": state.get("source", "Documents"),
+                    "result": state.get("rag_context", "")
+                })
+            elif "sql_result" in state:
+                import json
+                sql_raw = state.get("sql_result")
+                sql_data = json.loads(sql_raw) if isinstance(sql_raw, str) else sql_raw
+                tool_success = sql_data.get("success", False) if isinstance(sql_data, dict) else state.get("tool_success", False)
+                agent_results.append({
+                    "route": "SQL",
+                    "tool_called": state.get("tool_called", True),
+                    "tool_success": tool_success,
+                    "source": state.get("source", "Database"),
+                    "result": json.dumps(sql_data) if isinstance(sql_data, dict) else str(sql_raw)
+                })
 
         history_prefix = f"Conversation History:\n{history}\n\n" if history else ""
 
-        # Enforce anti-hallucination if tool failed
-        if tool_called and not tool_success:
-            return {"draft_response": "I couldn't find that information in the required database, documents, or search."}
-
-        if web_results:
-            prompt = (
-                f"{history_prefix}"
-                "Answer the user's question concisely using the web search results below. "
-                "Include web source links when applicable.\n\n"
-                f"User question: {user_message}\n\n"
-                f"Web search results:\n{web_results}"
-            )
-        elif rag_context:
-            prompt = (
-                f"{history_prefix}"
-                "Answer the user's question concisely using ONLY the retrieved enterprise context below. "
-                "If the context contains a relevant excerpt, summarize the explicit facts directly in 1-4 sentences. "
-                "Partial answers are allowed: if the document lists only some benefits, policy points, or requirements, answer with exactly those mentioned items. "
-                "Do NOT invent, guess, or use general knowledge. "
-                "Only return: 'I couldn't find that information in the uploaded company documents.' when the retrieved context is genuinely unrelated or empty.\n\n"
-                f"User question: {user_message}\n\n"
-                f"Retrieved enterprise context:\n{rag_context}"
-            )
-        elif sql_result_raw:
-            try:
-                sql_data = json.loads(sql_result_raw) if isinstance(sql_result_raw, str) else sql_result_raw
-                if not sql_data.get("success"):
-                    err_msg = sql_data.get("error", "Query execution failed.")
-                    return {
-                        "draft_response": f"I couldn't execute the requested database query due to a schema or database error: {err_msg}. Please verify available table and column names.",
-                        "sql_result": sql_data,
-                    }
-
-                if sql_data.get("answer"):
-                    prompt = (
-                        f"{history_prefix}"
-                        "Answer the user's question using ONLY the database-grounded answer below produced from a real "
-                        "PostgreSQL query. Do NOT change any numbers, names, or values in that answer — copy them exactly "
-                        "into your final response. If the answer contains an error instead of a result, report the error.\n\n"
-                        f"User question: {user_message}\n\n"
-                        f"Database answer: {sql_data['answer']}"
-                    )
-                elif sql_data.get("rows") is not None:
-                    prompt = (
-                        f"{history_prefix}"
-                        "Answer the user's question using ONLY the successful database query results below. "
-                        "Every number, name, aggregation, and rank must come directly from the JSON results. "
-                        "If the result does not contain the number the user asked about, say the database result was "
-                        "unavailable rather than inventing a value.\n\n"
-                        f"User question: {user_message}\n\n"
-                        f"Database query results:\n{json.dumps(sql_data['rows'], indent=2)}"
-                    )
-                elif "message" in sql_data:
-                    # Write transaction fallback message
-                    prompt = (
-                        f"{history_prefix}"
-                        "Answer the user's question using ONLY the successful database transaction results below. "
-                        f"User question: {user_message}\n\n"
-                        f"Transaction results:\n{json.dumps(sql_data, indent=2)}"
-                    )
+        # Enforce anti-hallucination strictly
+        if agent_results:
+            failed_agents = [r for r in agent_results if not r.get("tool_success")]
+            if len(failed_agents) == len(agent_results):
+                # All agents failed, return strict hallucination blocks based on type
+                route = failed_agents[0].get("route", "")
+                if route == "RAG":
+                    return {"draft_response": "I couldn't find that information in the uploaded documents."}
+                elif route == "SQL":
+                    return {"draft_response": "I couldn't retrieve that information from the company database."}
+                elif route == "WEB":
+                    return {"draft_response": "I couldn't retrieve the requested web information."}
                 else:
-                    prompt = (
-                        f"{history_prefix}"
-                        "The database query executed successfully, but returned 0 rows (empty dataset).\n"
-                        "Inform the user concisely that no matching records were found in the database. "
-                        "Do NOT invent or guess any numbers.\n\n"
-                        f"User question: {user_message}"
-                    )
-            except Exception:
-                prompt = (
-                    f"{history_prefix}"
-                    "Answer the user's question using the database query results below:\n\n"
-                    f"User question: {user_message}\n\n"
-                    f"Database results: {sql_result_raw}"
-                )
+                    return {"draft_response": "I couldn't find that information using the requested tools."}
+
+            # Synthesis Prompt Construction
+            successful_agents = [r for r in agent_results if r.get("tool_success")]
+            context_blocks = []
+            for r in successful_agents:
+                context_blocks.append(f"--- {r['route']} SOURCE ({r['source']}) ---\n{r['result']}\n")
+            
+            combined_context = "\n".join(context_blocks)
+            
+            prompt = (
+                f"{history_prefix}"
+                "You are an enterprise AI Assistant. Answer the user's question concisely using ONLY the provided verified agent results below.\n"
+                "If the context contains a relevant excerpt or data point, summarize it directly in 1-4 sentences.\n"
+                "Do NOT change any numbers, names, or values in that answer — copy them exactly into your final response.\n"
+                "Do NOT invent, guess, or use general knowledge. Do NOT fabricate sources, database rows, document contents, URLs, prices, sales numbers, or customers.\n\n"
+                f"Verified Agent Results:\n{combined_context}\n\n"
+                f"User Question: {user_message}"
+            )
         else:
             # Direct greeting, general query, or follow-up question
             prompt = (
@@ -165,12 +149,14 @@ def create_workflow(llm_client: LLMClient):
         output_state: Dict[str, Any] = {"draft_response": response}
 
         # Auto-promote substantial Q&A / RAG answer into active session artifact
+        tool_called = any(r.get("tool_called") for r in agent_results) if agent_results else False
         if response and len(response) > 20 and "couldn't find" not in response.lower() and tool_called:
             title = f"Q&A: {user_message[:35]}"
             if "kanish" in user_message.lower() or "skills" in user_message.lower():
                 title = "Kanishka Kumar Technical Skills"
 
-            sources_list = [state.get("source")] if state.get("source") else []
+            sources_list = list({r.get("source") for r in agent_results if r.get("source")})
+            from backend.app.services.artifact_service import create_artifact, save_session_artifact
             artifact_obj = create_artifact(
                 artifact_type="text",
                 title=title,

@@ -41,7 +41,11 @@ def _ensure_document_record_columns():
         "sql_table_name": "VARCHAR(100)",
         "error_message": "TEXT",
         "created_at": "TIMESTAMP",
-        "updated_at": "TIMESTAMP"
+        "updated_at": "TIMESTAMP",
+        "chunk_count": "INTEGER",
+        "status": "VARCHAR(20) DEFAULT 'processing'",
+        "content_hash": "VARCHAR(64)",
+        "source_path": "VARCHAR(500)"
     }
     with engine.begin() as conn:
         existing_columns = {column["name"] for column in inspect(conn).get_columns("document_records")}
