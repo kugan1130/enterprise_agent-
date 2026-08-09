@@ -1,6 +1,6 @@
 """Application configuration settings using Pydantic Settings."""
 
-from functools import lru_cache
+import os
 from pathlib import Path
 
 from pydantic import Field
@@ -20,9 +20,9 @@ class Settings(BaseSettings):
     ALLOWED_ORIGINS: str = "*"
     MAX_UPLOAD_SIZE_MB: int = 10
     DATA_DIR: Path = BASE_DIR / ".data"
-    
-    # LangSmith & MCP Tracing
-    LANGCHAIN_TRACING_V2: str = "true"
+
+    # LangSmith & MCP Tracing (Only enable if LANGCHAIN_API_KEY is present)
+    LANGCHAIN_TRACING_V2: str = "false"
     LANGCHAIN_API_KEY: str = ""
     LANGCHAIN_PROJECT: str = "enterprise-ai-assistant"
     LANGCHAIN_ENDPOINT: str = "https://api.smith.langchain.com"
@@ -38,9 +38,12 @@ class Settings(BaseSettings):
     )
 
 
-@lru_cache
 def get_settings() -> Settings:
-    return Settings()
+    st = Settings()
+    if not st.LANGCHAIN_API_KEY:
+        os.environ["LANGCHAIN_TRACING_V2"] = "false"
+        st.LANGCHAIN_TRACING_V2 = "false"
+    return st
 
 
 settings = get_settings()

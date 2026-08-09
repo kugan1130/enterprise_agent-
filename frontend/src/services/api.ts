@@ -1,4 +1,4 @@
-import { DocumentRecord, SSEPayload, UploadResponse } from "../types";
+import { ArtifactRecord, ChatStreamEvent, DocumentRecord, UploadResponse } from "../types";
 import { getApiBaseUrl, getStoredToken } from "./authService";
 
 export const uploadPDF = async (file: File): Promise<UploadResponse> => {
@@ -41,11 +41,12 @@ export const fetchDocuments = async (): Promise<DocumentRecord[]> => {
 };
 
 export interface StreamChatHandlers {
-  onStatus: (message: string) => void;
-  onRoute: (route: string) => void;
-  onToken: (chunk: string) => void;
-  onComplete: (fullResponse: string) => void;
-  onError: (errorMsg: string) => void;
+  onActivity: (message: string, requestId?: string) => void;
+  onRoute: (route: string, requestId?: string) => void;
+  onToken: (chunk: string, requestId?: string) => void;
+  onArtifact: (artifact: ArtifactRecord, requestId?: string) => void;
+  onComplete: (fullResponse: string, requestId?: string) => void;
+  onError: (errorMsg: string, requestId?: string) => void;
 }
 
 export const streamChat = async (
@@ -81,39 +82,68 @@ export const streamChat = async (
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let accumulatedResponse = "";
+    let buffer = "";
 
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
 
-      const chunkStr = decoder.decode(value, { stream: true });
-      const lines = chunkStr.split("\n");
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || ""; // Retain incomplete trailing line fragment in buffer
 
       for (const line of lines) {
         const trimmed = line.trim();
         if (trimmed.startsWith("data: ")) {
           try {
-            const payload = JSON.parse(trimmed.substring(6)) as SSEPayload;
+            const rawPayload = JSON.parse(trimmed.substring(6));
+            const event: ChatStreamEvent = rawPayload;
+            const reqId = event.request_id;
+            const eventType = event.type || event.event;
 
-            if (payload.event === "status" && payload.message) {
-              handlers.onStatus(payload.message);
-            } else if (payload.event === "route_selected" && payload.route) {
-              handlers.onRoute(payload.route);
-            } else if (payload.event === "token" && payload.chunk) {
-              accumulatedResponse += payload.chunk;
-              handlers.onToken(payload.chunk);
-            } else if (payload.event === "completed") {
-              const finalResp = payload.response || accumulatedResponse;
-              handlers.onComplete(finalResp);
-            } else if (payload.event === "error" && payload.error) {
-              handlers.onError(payload.error);
+            if (eventType === "activity" || eventType === "status") {
+              const activityMsg = event.message || "Processing request...";
+              handlers.onActivity(activityMsg, reqId);
+            } else if (eventType === "route" || eventType === "route_selected") {
+              const routeName = event.route || "direct";
+              handlers.onRoute(routeName, reqId);
+            } else if (eventType === "token") {
+              const tokenChunk = event.chunk || event.content || "";
+              if (tokenChunk) {
+                accumulatedResponse += tokenChunk;
+                handlers.onToken(tokenChunk, reqId);
+              }
+            } else if (eventType === "artifact" && event.artifact) {
+              handlers.onArtifact(event.artifact, reqId);
+            } else if (eventType === "final" || eventType === "completed") {
+              const finalContent = event.content || event.response || accumulatedResponse;
+              if (finalContent) {
+                accumulatedResponse = finalContent;
+              }
+              handlers.onComplete(accumulatedResponse, reqId);
+            } else if (eventType === "error") {
+              const errorMsg = event.error || event.message || "An error occurred.";
+              handlers.onError(errorMsg, reqId);
             }
           } catch {
-            // Ignore partial SSE JSON parse chunks
+            // Ignore incomplete line fragment JSON parsing
           }
         }
       }
     }
+
+    if (buffer.trim().startsWith("data: ")) {
+      try {
+        const event: ChatStreamEvent = JSON.parse(buffer.trim().substring(6));
+        if ((event.type === "final" || event.event === "completed") && (event.content || event.response)) {
+          accumulatedResponse = event.content || event.response || accumulatedResponse;
+        }
+      } catch {
+        // Safe end of stream
+      }
+    }
+
+    handlers.onComplete(accumulatedResponse);
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : "Network communication error.";
     handlers.onError(errorMsg);

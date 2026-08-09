@@ -1,7 +1,6 @@
 """PDF Upload and Document Ingestion API endpoints."""
 
 import uuid
-from datetime import datetime
 from pathlib import Path
 from typing import Annotated, List
 
@@ -11,7 +10,7 @@ from sqlalchemy.orm import Session
 from backend.app.api.auth import get_current_user, get_db, require_admin_user
 from backend.app.core.config import settings
 from backend.app.models.user import DocumentRecord, User
-from backend.app.rag.ingest import ingest_single_pdf
+from backend.app.rag.ingest import ingest_pdf
 
 router = APIRouter(prefix="/api/documents", tags=["documents"])
 
@@ -40,53 +39,47 @@ async def upload_pdf(
             detail=f"File size exceeds maximum allowed limit of {settings.MAX_UPLOAD_SIZE_MB}MB.",
         )
 
-    # Generate safe unique document identifier
-    doc_uuid = uuid.uuid4().hex[:12]
-    document_id = f"doc_{doc_uuid}"
-    safe_filename = f"{document_id}.pdf"
+    # 1. Pre-ingestion duplicate check
+    import hashlib
+    file_hash = hashlib.sha256(content).hexdigest()
+    document_id = f"doc_{file_hash[:40]}"
+    
+    existing = db.query(DocumentRecord).filter(DocumentRecord.document_id == document_id).first()
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Document already uploaded/indexed."
+        )
 
     # Ensure storage directory exists
     storage_dir = settings.DATA_DIR
     storage_dir.mkdir(parents=True, exist_ok=True)
-    save_path = storage_dir / safe_filename
+    save_path = storage_dir / f"upload_{uuid.uuid4().hex}.pdf"
 
     with open(save_path, "wb") as f:
         f.write(content)
 
-    timestamp_str = datetime.utcnow().isoformat()
-
-    metadata = {
-        "document_id": document_id,
-        "filename": file.filename,
-        "upload_timestamp": timestamp_str,
-        "uploaded_by": current_user.username,
-    }
-
     try:
-        chunks_ingested = ingest_single_pdf(save_path, metadata)
+        result = ingest_pdf(
+            save_path,
+            db=db,
+            filename=file.filename,
+            safe_filename=save_path.name,
+            uploaded_by=current_user.username,
+            source_path=f"uploads/{Path(file.filename).name}",
+        )
     except Exception as err:
+        save_path.unlink(missing_ok=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Unable to process and index PDF: {err}",
         )
 
-    # Store record in database
-    doc_record = DocumentRecord(
-        document_id=document_id,
-        filename=file.filename,
-        safe_filename=safe_filename,
-        file_size=len(content),
-        uploaded_by=current_user.username,
-        upload_timestamp=datetime.utcnow(),
-    )
-    db.add(doc_record)
-    db.commit()
-
     return {
-        "document_id": document_id,
+        "document_id": result.document_id,
         "filename": file.filename,
-        "chunks_ingested": chunks_ingested,
-        "status": "ingested",
+        "chunks_ingested": result.chunk_count,
+        "status": "already_ingested" if result.skipped else "ingested",
         "message": f"{file.filename} is ready. You can now ask questions about it.",
     }
 
@@ -97,7 +90,7 @@ def list_documents(
     db: Session = Depends(get_db),
 ):
     """Returns list of uploaded documents."""
-    records = db.query(DocumentRecord).all()
+    records = db.query(DocumentRecord).filter(DocumentRecord.status == "indexed").all()
     return [
         {
             "document_id": r.document_id,

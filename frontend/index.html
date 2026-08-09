@@ -263,11 +263,15 @@
 
                 const userMsg = { id: Date.now(), role: "user", content: text };
                 const asstId = Date.now() + 1;
-                const asstMsg = { id: asstId, role: "assistant", content: "Assistant is thinking...", isStreaming: true };
                 
-                setMessages(prev => [...prev, userMsg, asstMsg]);
+                // Append ONLY user message to chat canvas on Send. Internal activity events go to ActivityPanel.
+                setMessages(prev => [...prev, userMsg]);
                 setIsSending(true);
                 setActivitySteps(["Evaluating request guardrails..."]);
+
+                let assistantCreated = false;
+                let currentRoute = "direct";
+                let fullText = "";
 
                 try {
                     const response = await fetch(`${API_BASE_URL}/api/chat/stream`, {
@@ -282,7 +286,6 @@
 
                     const reader = response.body.getReader();
                     const decoder = new TextDecoder();
-                    let fullText = "";
 
                     while (true) {
                         const { done, value } = await reader.read();
@@ -295,24 +298,43 @@
                             if (trimmed.startsWith("data: ")) {
                                 try {
                                     const payload = JSON.parse(trimmed.substring(6));
-                                    if (payload.event === "status") {
-                                        setActivitySteps(prev => [...prev, payload.message]);
-                                    } else if (payload.event === "route_selected") {
-                                        setActivitySteps(prev => [...prev, `Routed to '${payload.route.toUpperCase()}' Agent`]);
-                                        setMessages(prev => prev.map(m => m.id === asstId ? { ...m, route: payload.route } : m));
-                                    } else if (payload.event === "token") {
-                                        fullText += payload.chunk;
-                                        setMessages(prev => prev.map(m => m.id === asstId ? { ...m, content: fullText, isStreaming: false } : m));
-                                    } else if (payload.event === "completed") {
+                                    const evType = payload.type || payload.event;
+                                    if (evType === "status" || evType === "activity") {
+                                        if (payload.message) setActivitySteps(prev => [...prev, payload.message]);
+                                    } else if (evType === "route" || evType === "route_selected") {
+                                        currentRoute = payload.route || "direct";
+                                        setActivitySteps(prev => [...prev, `Routed to '${currentRoute.toUpperCase()}' Agent`]);
+                                    } else if (evType === "token") {
+                                        fullText += (payload.chunk || payload.content || "");
+                                        setMessages(prev => {
+                                            if (!assistantCreated) {
+                                                assistantCreated = true;
+                                                return [...prev, { id: asstId, role: "assistant", content: fullText, route: currentRoute, isStreaming: true }];
+                                            }
+                                            return prev.map(m => m.id === asstId ? { ...m, content: fullText, route: currentRoute, isStreaming: true } : m);
+                                        });
+                                    } else if (evType === "completed" || evType === "final") {
+                                        const finalResp = payload.content || payload.response || fullText;
                                         setActivitySteps(prev => [...prev, "Execution completed."]);
-                                        setMessages(prev => prev.map(m => m.id === asstId ? { ...m, content: payload.response || fullText, isStreaming: false } : m));
+                                        setMessages(prev => {
+                                            if (!assistantCreated) {
+                                                assistantCreated = true;
+                                                return [...prev, { id: asstId, role: "assistant", content: finalResp, route: currentRoute, isStreaming: false }];
+                                            }
+                                            return prev.map(m => m.id === asstId ? { ...m, content: finalResp, route: currentRoute, isStreaming: false } : m);
+                                        });
                                     }
                                 } catch (e) {}
                             }
                         }
                     }
                 } catch (err) {
-                    setMessages(prev => prev.map(m => m.id === asstId ? { ...m, content: `Notice: ${err.message}`, error: true } : m));
+                    setMessages(prev => {
+                        if (!assistantCreated) {
+                            return [...prev, { id: asstId, role: "assistant", content: `Notice: ${err.message}`, error: true, isStreaming: false }];
+                        }
+                        return prev.map(m => m.id === asstId ? { ...m, content: `Notice: ${err.message}`, error: true, isStreaming: false } : m);
+                    });
                 } finally {
                     setIsSending(false);
                 }
@@ -373,7 +395,7 @@
                 <div className="app-layout">
                     <aside className="sidebar">
                         <div className="sidebar-brand">
-                            <div className="brand-logo"><i class="fa-solid fa-brain"></i></div>
+                            <div className="brand-logo"><i className="fa-solid fa-brain"></i></div>
                             <div className="brand-info"><h3>Nexa AI</h3><span>Enterprise Assistant</span></div>
                         </div>
                         <div className="user-profile-badge">
@@ -438,7 +460,14 @@
                                         <div className="avatar"><i className={m.role === "user" ? "fa-solid fa-user" : "fa-solid fa-bot"}></i></div>
                                         <div className="bubble">
                                             {m.route && <div className="route-badge">ROUTE: {m.route.toUpperCase()}</div>}
-                                            <div dangerouslySetInnerHTML={{ __html: typeof marked !== "undefined" ? marked.parse(m.content) : m.content }} />
+                                            <div dangerouslySetInnerHTML={{
+                                                __html: typeof marked !== "undefined"
+                                                    ? marked.parse(m.content).replace(
+                                                        /<a href="(\/api\/reports\/download\/[^"]+)">([^<]+)<\/a>/g,
+                                                        '<a href="$1" target="_blank" class="primary-btn" style="display:inline-flex;margin-top:10px;text-decoration:none;padding:8px 16px;font-size:12px;"><i class="fa-solid fa-file-pdf"></i> Download PDF Report</a>'
+                                                      )
+                                                    : m.content
+                                            }} />
                                         </div>
                                     </div>
                                 ))

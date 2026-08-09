@@ -1,25 +1,31 @@
-"""Tavily-backed web search for graph nodes."""
+"""Tavily web search tool wrapped as a standard LangChain Tool."""
 
-from tavily import TavilyClient
-
+import logging
 from backend.app.core.config import settings
+
+logger = logging.getLogger("enterprise_ai.web_search")
 
 
 def search_web(query: str) -> str:
-    """Search the web and return concise, source-linked results."""
+    """Search the live web for real-time external information and news."""
     if not settings.TAVILY_API_KEY:
-        raise RuntimeError("TAVILY_API_KEY is not configured.")
+        return "Web search is disabled: TAVILY_API_KEY is not set."
 
-    response = TavilyClient(api_key=settings.TAVILY_API_KEY).search(
-        query=query,
-        search_depth="basic",
-        max_results=5,
-    )
-    results = response.get("results", [])
-    if not results:
-        return "No web search results found."
+    try:
+        from tavily import TavilyClient
+        response = TavilyClient(api_key=settings.TAVILY_API_KEY).search(
+            query=query,
+            search_depth="basic",
+            max_results=5,
+        )
+        results = response.get("results", [])
+        if not results:
+            return "No web search results found."
 
-    return "\n\n".join(
-        f"{index}. {result['title']}\n{result['content']}\nSource: {result['url']}"
-        for index, result in enumerate(results, start=1)
-    )
+        return "\n\n".join(
+            f"{index}. {result['title']}\n{result['content']}\nSource: {result['url']}"
+            for index, result in enumerate(results, start=1)
+        )
+    except Exception as err:
+        logger.warning("Web search notice for query %r: %s", query, err)
+        return f"Web search error: {str(err)}"

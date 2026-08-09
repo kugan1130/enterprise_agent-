@@ -1,0 +1,57 @@
+# Git
+.git
+.gitignore
+
+# Secrets
+.env
+.env.*
+secrets.json
+
+# Python
+.venv
+venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+.coverage
+htmlcov
+
+# Node/Frontend
+node_modules
+frontend/node_modules
+frontend/dist
+dist
+build
+.npm
+
+# Databases and Data
+*.db
+*.sqlite
+*.sqlite3
+enterprise_app.db
+.data/
+data/raw/
+data/processed/
+chroma/
+.chroma/
+uploads/
+
+# Logs and temp files
+*.log
+logs/
+*.tmp
+*.bak
+*.swp
+.DS_Store
+Thumbs.db
+
+# IDEs
+.vscode
+.idea
+
+# Docker
+docker-compose.yml
+Dockerfile
+.dockerignore

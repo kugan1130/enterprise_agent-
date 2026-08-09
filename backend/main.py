@@ -15,8 +15,10 @@ from backend.app.api.auth import router as auth_router
 from backend.app.api.chat import router as chat_router
 from backend.app.api.documents import router as documents_router
 from backend.app.api.health import router as health_router
+from backend.app.api.reports import router as reports_router
+
 from backend.app.core.config import settings
-from backend.app.core.database import Base, engine
+from backend.app.core.database import Base, SessionLocal, engine
 from backend.app.core.middleware import CorrelationIdMiddleware, enterprise_exception_handler
 from backend.app.llm.groq_provider import GroqProvider
 from backend.app.llm.llm_client import LLMClient
@@ -25,12 +27,98 @@ from backend.services.chat_service import ChatService
 frontend_dir = project_dir / "frontend"
 
 
+def _ensure_document_record_columns():
+    """Adds ingestion metadata columns to existing deployments without replacing document records."""
+    from sqlalchemy import inspect, text
+
+    required_columns = {
+        "user_id": "INTEGER",
+        "original_filename": "VARCHAR(255)",
+        "file_type": "VARCHAR(20)",
+        "storage_path": "VARCHAR(500)",
+        "source_path": "VARCHAR(500)",
+        "content_hash": "VARCHAR(64)",
+        "chunk_count": "INTEGER",
+        "status": "VARCHAR(20) DEFAULT 'indexed'",
+        "rag_status": "VARCHAR(20) DEFAULT 'not_applicable'",
+        "sql_status": "VARCHAR(20) DEFAULT 'not_applicable'",
+        "sql_table_name": "VARCHAR(255)",
+        "error_message": "TEXT",
+        "created_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+        "updated_at": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+    }
+    with engine.begin() as conn:
+        existing_columns = {column["name"] for column in inspect(conn).get_columns("document_records")}
+        for name, column_type in required_columns.items():
+            if name not in existing_columns:
+                conn.execute(text(f"ALTER TABLE document_records ADD COLUMN {name} {column_type}"))
+                
+        # Reconcile legacy documents that were just given the 'processing' default
+        try:
+            conn.execute(text("UPDATE document_records SET status = 'indexed' WHERE status = 'processing' AND (chunk_count IS NULL OR chunk_count > 0)"))
+        except Exception as e:
+            pass
+
+
+def _seed_sales_table_if_needed():
+    """Seeds sales table from data/sql/01_sales_seed.sql if sales table does not exist or is empty."""
+    try:
+        from sqlalchemy import inspect, text
+        with engine.connect() as conn:
+            inspector = inspect(conn)
+            tables = inspector.get_table_names()
+            table_empty = False
+            if "sales" in tables:
+                row_count = conn.execute(text("SELECT COUNT(*) FROM sales")).scalar_one()
+                table_empty = row_count == 0
+
+            if "sales" not in tables or table_empty:
+                sql_path = project_dir / "data" / "sql" / "01_sales_seed.sql"
+                if sql_path.exists():
+                    print(f"Seeding database from {sql_path.name}...")
+                    sql_content = sql_path.read_text(encoding="utf-8")
+                    # Remove line comments so the leading script header does not hide CREATE TABLE.
+                    sql_without_comments = "\n".join(
+                        line for line in sql_content.splitlines() if not line.lstrip().startswith("--")
+                    )
+                    statements = [s.strip() for s in sql_without_comments.split(";") if s.strip()]
+                    for stmt in statements:
+                        conn.execute(text(stmt))
+                    conn.commit()
+                    print("Successfully seeded 'sales' table with 35 transactions.")
+    except Exception as err:
+        print(f"Sales table seeding notice: {err}")
+
+
+def _auto_ingest_initial_documents():
+    """Synchronizes bundled company PDFs through the same pipeline as uploaded PDFs."""
+    try:
+        from backend.app.rag.ingest import COLLECTION_NAME, ingest_documents
+        doc_dir = Path("/app/data/documents")
+        if not doc_dir.exists():
+            doc_dir = Path("/app/data/nexatech_documents/documents")
+        if not doc_dir.exists():
+            doc_dir = project_dir / "data" / "nexatech_documents" / "documents"
+
+        if doc_dir.exists():
+            with SessionLocal() as session:
+                count = ingest_documents(doc_dir, db=session)
+            print(f"Synchronized {count} chunks into Chroma collection '{COLLECTION_NAME}'")
+    except Exception as err:
+        print(f"Startup document ingestion notice: {err}")
+
+
 def create_app() -> FastAPI:
     # Initialize DB tables with fallback protection
     try:
         Base.metadata.create_all(bind=engine)
+        _ensure_document_record_columns()
+        _seed_sales_table_if_needed()
     except Exception as err:
         print(f"Database table initialization notice: {err}")
+
+    # Auto-ingest static PDFs if Chroma collection is empty
+    _auto_ingest_initial_documents()
 
     app = FastAPI(title=settings.APP_NAME, debug=settings.DEBUG)
 
@@ -56,6 +144,7 @@ def create_app() -> FastAPI:
     app.include_router(chat_router)
     app.include_router(auth_router)
     app.include_router(documents_router)
+    app.include_router(reports_router)
 
     dist_dir = frontend_dir / "dist"
     if dist_dir.exists():

@@ -14,21 +14,41 @@ export interface AuthResponse {
   user: User;
 }
 
+export interface ArtifactRecord {
+  artifact_id: string;
+  artifact_type: string;
+  title: string;
+  content: string;
+  artifact_format?: string;
+  download_url?: string;
+  file_path?: string;
+  source_documents?: string[];
+  created_at?: string;
+}
+
 export interface ChatMessage {
   id: string;
   role: "user" | "assistant";
   content: string;
   route?: string;
+  artifact?: ArtifactRecord;
+  download_url?: string;
   isStreaming?: boolean;
   error?: string;
 }
 
-export interface SSEPayload {
-  event: "status" | "route_selected" | "token" | "completed" | "error";
+export type ChatEventType = "activity" | "route" | "token" | "final" | "artifact" | "error";
+
+export interface ChatStreamEvent {
+  request_id?: string;
+  type: ChatEventType;
+  event?: string;
   message?: string;
   route?: string;
   chunk?: string;
+  content?: string;
   response?: string;
+  artifact?: ArtifactRecord;
   error?: string;
 }
 

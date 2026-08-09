@@ -46,6 +46,7 @@ chroma/
 .chroma/
 .data/chroma/
 .data/reports/
+uploads/
 
 # ==============================================================================
 # 5. LOGS & TEMPORARY FILES

@@ -8,6 +8,7 @@ interface MessageBubbleProps {
 
 export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
   const isUser = message.role === "user";
+  const downloadUrl = message.download_url || message.artifact?.download_url;
 
   const renderContent = () => {
     if (message.error) {
@@ -32,6 +33,31 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
           <div className="route-badge">ROUTE: {message.route.toUpperCase()}</div>
         )}
         {renderContent()}
+
+        {!isUser && downloadUrl && (
+          <div className="artifact-download-banner" style={{ marginTop: "12px" }}>
+            <a
+              href={downloadUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="download-btn"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "8px",
+                padding: "8px 16px",
+                backgroundColor: "#2563eb",
+                color: "#ffffff",
+                borderRadius: "6px",
+                textDecoration: "none",
+                fontWeight: 600,
+                fontSize: "14px",
+              }}
+            >
+              <i className="fa-solid fa-file-pdf"></i> Download PDF Report
+            </a>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -40,6 +40,7 @@ ENV PYTHONUNBUFFERED=1
 # Copy application source code
 COPY backend /app/backend
 COPY frontend /app/frontend
+COPY data/sql /app/data/sql
 COPY main.py /app/main.py
 
 # Create data directory for ChromaDB and PDF reports

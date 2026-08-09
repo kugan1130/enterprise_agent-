@@ -1,6 +1,7 @@
-"""SQL Query validation, schema inspection, and read-only execution tool."""
+"""SQL Query validation, schema inspection, and read-only execution tools wrapped as LangChain Tools."""
 
 import re
+from decimal import Decimal
 from typing import Any, Dict, List
 from sqlalchemy import inspect, text
 
@@ -24,7 +25,7 @@ FORBIDDEN_KEYWORDS = {
 
 
 def get_database_schema() -> str:
-    """Inspects the actual database tables and column definitions dynamically."""
+    """Inspects database tables and column definitions dynamically."""
     try:
         with SessionLocal() as session:
             inspector = inspect(session.bind)
@@ -75,7 +76,7 @@ def validate_read_only_sql(query: str) -> str:
 
 
 def execute_sql_query(query: str) -> Dict[str, Any]:
-    """Validates and executes a read-only SQL query against the database."""
+    """Validates and executes a read-only SELECT SQL query against the database engine."""
     try:
         validated_sql = validate_read_only_sql(query)
     except ValueError as val_err:
@@ -93,7 +94,18 @@ def execute_sql_query(query: str) -> Dict[str, Any]:
             if result.returns_rows:
                 columns = list(result.keys())
                 raw_rows = result.fetchall()
-                rows = [dict(zip(columns, row)) for row in raw_rows]
+                rows = [
+                    dict(
+                        zip(
+                            columns,
+                            [
+                                int(v) if isinstance(v, Decimal) and v == v.to_integral_value() else float(v) if isinstance(v, Decimal) else v
+                                for v in row
+                            ],
+                        )
+                    )
+                    for row in raw_rows
+                ]
                 return {
                     "success": True,
                     "columns": columns,

@@ -1,126 +1,260 @@
-"""PDF ingestion into a persistent Chroma collection."""
+"""PDF document ingestion into persistent ChromaDB vector store with clean text extraction."""
 
+import logging
+import hashlib
+import sys
+from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
-from typing import cast
+from typing import cast, List, Dict, Any
 
 import chromadb
 from chromadb.api.types import Embedding, Metadata
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from backend.app.rag.embeddings import embed_passages
-
+from backend.app.models.user import DocumentRecord
 
 COLLECTION_NAME = "enterprise_documents"
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_CHROMA_PATH = PROJECT_ROOT / ".data" / "chroma"
 
+logger = logging.getLogger("enterprise_ai.rag_ingest")
 
-def ingest_documents(
-    documents_path: Path,
+
+@dataclass
+class IngestionResult:
+    document_id: str
+    chunk_count: int
+    skipped: bool
+
+
+def _prune_legacy_duplicates(collection, filename: str, kept_ids: set) -> None:
+    """Removes pre-refactor chunks that used filename-based document IDs instead of content hashes."""
+    try:
+        matches = collection.get(where={"filename": filename}, include=["metadatas"])
+        to_delete = [
+            chunk_id
+            for chunk_id, meta in zip(matches["ids"], matches["metadatas"])
+            if chunk_id not in kept_ids and (
+                str(meta.get("content_hash", "")).strip() == ""
+                or str(meta.get("document_id", "")) == Path(filename).stem
+            )
+        ]
+        if to_delete:
+            collection.delete(ids=to_delete)
+            logger.info("Pruned %d legacy duplicate chunks for %s", len(to_delete), filename)
+    except Exception as err:
+        logger.warning("Legacy chunk pruning notice for %s: %s", filename, err)
+
+
+def _extract_pdf_text_clean(pdf_path: Path) -> List[str]:
+    """Extracts page text from PDF using pypdf.PdfReader."""
+    pages_text = []
+    try:
+        import pypdf
+        reader = pypdf.PdfReader(str(pdf_path))
+        for page_idx, page in enumerate(reader.pages):
+            txt = page.extract_text() or ""
+            if txt.strip():
+                pages_text.append(txt)
+    except Exception as err:
+        logger.warning("pypdf extraction warning on %s: %s", pdf_path.name, err)
+    return pages_text
+
+
+def ingest_pdf(
+    pdf_path: Path,
     *,
+    db: Any,
+    filename: str,
+    safe_filename: str,
+    uploaded_by: str,
+    source_path: str,
     persist_path: Path = DEFAULT_CHROMA_PATH,
     collection_name: str = COLLECTION_NAME,
-) -> int:
-    """Load PDFs, chunk them, and upsert their E5 vectors into Chroma."""
-    pdf_paths = sorted(documents_path.glob("*.pdf"))
-    if not pdf_paths:
-        raise FileNotFoundError(f"No PDF documents found in {documents_path}")
+) -> IngestionResult:
+    """The single ingestion path for filesystem and uploaded PDF documents."""
+    content_hash = hashlib.sha256(pdf_path.read_bytes()).hexdigest()
+    document_id = f"doc_{content_hash[:40]}"
+    
+    # 1. Check PostgreSQL first to avoid duplicate processing
+    existing = db.query(DocumentRecord).filter(DocumentRecord.document_id == document_id).first()
+    if existing:
+        if getattr(existing, "status", "indexed") == "indexed":
+            logger.info(f"Document {filename} already indexed. Skipping.")
+            return IngestionResult(document_id=document_id, chunk_count=existing.chunk_count or 0, skipped=True)
+        elif getattr(existing, "status", "indexed") == "processing":
+            logger.info(f"Document {filename} is currently processing. Skipping.")
+            return IngestionResult(document_id=document_id, chunk_count=0, skipped=True)
+    
+    # 2. Create PostgreSQL DocumentRecord FIRST (status=processing)
+    if existing is None:
+        existing = DocumentRecord(
+            document_id=document_id,
+            filename=filename,
+            safe_filename=safe_filename,
+            file_size=pdf_path.stat().st_size,
+            uploaded_by=uploaded_by,
+            upload_timestamp=datetime.utcnow(),
+            source_path=source_path,
+            content_hash=content_hash,
+            chunk_count=0,
+            status="processing"
+        )
+        db.add(existing)
+    else:
+        existing.status = "processing"
+    
+    db.commit()
 
-    documents = []
-    for pdf_path in pdf_paths:
+    try:
+        from backend.app.core.chroma import get_chroma_client
+        client = get_chroma_client(persist_path)
+        collection = client.get_or_create_collection(name=collection_name, metadata={"hnsw:space": "cosine"})
+        
+        documents = []
         try:
             from langchain_community.document_loaders import PyPDFLoader
-            documents.extend(PyPDFLoader(str(pdf_path)).load())
+            pdf_docs = PyPDFLoader(str(pdf_path)).load()
+            if pdf_docs:
+                documents = pdf_docs
         except Exception:
+            pass
+
+        if not documents:
+            extracted_pages = _extract_pdf_text_clean(pdf_path)
             from langchain_core.documents import Document
-            with open(pdf_path, "rb") as f:
-                raw_text = f.read().decode("latin1", errors="ignore")
-            documents.append(Document(page_content=raw_text, metadata={"source": pdf_path.name, "page": 0}))
+            for page_idx, page_text in enumerate(extracted_pages):
+                documents.append(
+                    Document(
+                        page_content=page_text,
+                        metadata={"source": pdf_path.name, "page": page_idx},
+                    )
+                )
 
-    chunks = RecursiveCharacterTextSplitter(
-        chunk_size=1_000,
-        chunk_overlap=150,
-    ).split_documents(documents)
-    texts = [chunk.page_content for chunk in chunks]
-    ids = [f"{Path(chunk.metadata.get('source', 'doc')).stem}-{index}" for index, chunk in enumerate(chunks)]
-    metadatas: list[Metadata] = [
-        {
-            "source": Path(chunk.metadata.get("source", "document.pdf")).name,
-            "chunk_id": chunk_id,
-            "page": chunk.metadata.get("page", 0),
-        }
-        for chunk, chunk_id in zip(chunks, ids, strict=True)
-    ]
+        if not documents:
+            raise ValueError(f"No extractable text found in {pdf_path.name}.")
 
-    client = chromadb.PersistentClient(path=str(persist_path))
-    collection = client.get_or_create_collection(
-        name=collection_name,
-        metadata={"hnsw:space": "cosine"},
-    )
-    collection.upsert(
-        ids=ids,
-        documents=texts,
-        metadatas=metadatas,
-        embeddings=cast(list[Embedding], embed_passages(texts)),
-    )
-    return len(chunks)
+        chunks = RecursiveCharacterTextSplitter(
+            chunk_size=800,
+            chunk_overlap=120,
+        ).split_documents(documents)
 
+        texts: List[str] = []
+        ids: List[str] = []
+        metadatas: List[Metadata] = []
 
-def ingest_single_pdf(
-    pdf_path: Path,
-    doc_metadata: dict,
-    *,
-    persist_path: Path = DEFAULT_CHROMA_PATH,
-    collection_name: str = COLLECTION_NAME,
-) -> int:
-    """Load a single uploaded PDF file, chunk, embed, and upsert to ChromaDB."""
-    try:
-        from langchain_community.document_loaders import PyPDFLoader
-        documents = PyPDFLoader(str(pdf_path)).load()
+        for idx, chunk in enumerate(chunks):
+            content = chunk.page_content.strip()
+            if not content:
+                continue
+            chunk_id = f"{document_id}-c{idx}"
+            ids.append(chunk_id)
+            texts.append(content)
+            metadatas.append(
+                {
+                    "document_id": document_id,
+                    "filename": filename,
+                    "source": filename,
+                    "source_path": source_path,
+                    "content_hash": content_hash,
+                    "uploaded_by": uploaded_by,
+                    "chunk_id": chunk_id,
+                    "chunk_index": idx,
+                    "page": chunk.metadata.get("page", 0),
+                }
+            )
+
+        if not texts:
+            raise ValueError(f"No non-empty text chunks found in {pdf_path.name}.")
+
+        # Replace all prior chunks
+        existing_chunks = collection.get(where={"document_id": document_id})["ids"]
+        if existing_chunks:
+            collection.delete(where={"document_id": document_id})
+        
+        collection.upsert(
+            ids=ids,
+            documents=texts,
+            metadatas=metadatas,
+            embeddings=cast(List[Embedding], embed_passages(texts)),
+        )
+
+        _prune_legacy_duplicates(collection, filename, set(ids))
+        
+        # Update PostgreSQL (status=indexed)
+        existing.status = "indexed"
+        existing.chunk_count = len(texts)
+        db.commit()
+        
+        # Diagnostic logging
+        logger.info("=== INGESTION DIAGNOSTIC LOG ===")
+        logger.info(f"Document ID: {document_id}")
+        logger.info(f"Filename: {filename}")
+        logger.info(f"File Hash: {content_hash}")
+        logger.info(f"Chunk Count: {len(texts)}")
+        logger.info("Embedding Model: intfloat/multilingual-e5-large")
+        logger.info("Embedding Dimension: 1024")
+        logger.info(f"Chroma Path: {persist_path}")
+        logger.info(f"Collection Name: {collection_name}")
+        logger.info("================================")
+        
+        return IngestionResult(document_id=document_id, chunk_count=len(texts), skipped=False)
+        
     except Exception as err:
-        print(f"PyPDFLoader notice ({err}), attempting raw fallback text extraction...")
-        from langchain_core.documents import Document
-        with open(pdf_path, "rb") as f:
-            raw_text = f.read().decode("latin1", errors="ignore")
-        documents = [Document(page_content=raw_text, metadata={"source": pdf_path.name, "page": 0})]
+        logger.error(f"Ingestion failed for {filename}: {err}")
+        existing.status = "failed"
+        db.commit()
+        raise err
 
-    if not documents:
-        return 0
 
-    chunks = RecursiveCharacterTextSplitter(
-        chunk_size=1_000,
-        chunk_overlap=150,
-    ).split_documents(documents)
+def ingest_documents(documents_path: Path, *, db: Any = None, persist_path: Path = DEFAULT_CHROMA_PATH, collection_name: str = COLLECTION_NAME) -> int:
+    """Ingest all supported company PDFs through the common PDF ingestion path."""
+    if db is None:
+        from backend.app.core.database import SessionLocal
 
-    doc_id = doc_metadata.get("document_id", pdf_path.stem)
-    texts = [chunk.page_content for chunk in chunks if chunk.page_content.strip()]
-    if not texts:
-        return 0
+        with SessionLocal() as session:
+            return ingest_documents(
+                documents_path,
+                db=session,
+                persist_path=persist_path,
+                collection_name=collection_name,
+            )
 
-    ids = [f"{doc_id}-{idx}" for idx in range(len(texts))]
+    total_chunks = 0
+    for pdf_path in sorted(documents_path.glob("*.pdf")):
+        result = ingest_pdf(
+            pdf_path,
+            db=db,
+            filename=pdf_path.name,
+            safe_filename=pdf_path.name,
+            uploaded_by="system",
+            source_path=str(pdf_path),
+            persist_path=persist_path,
+            collection_name=collection_name,
+        )
+        total_chunks += result.chunk_count
+    return total_chunks
 
-    metadatas: list[Metadata] = [
-        {
-            "document_id": doc_id,
-            "filename": doc_metadata.get("filename", pdf_path.name),
-            "source": doc_metadata.get("filename", pdf_path.name),
-            "uploaded_by": doc_metadata.get("uploaded_by", "system"),
-            "upload_timestamp": doc_metadata.get("upload_timestamp", ""),
-            "chunk_id": chunk_id,
-            "page": chunk.metadata.get("page", 0),
-        }
-        for chunk, chunk_id in zip(chunks, ids, strict=True)
-    ]
 
-    client = chromadb.PersistentClient(path=str(persist_path))
-    collection = client.get_or_create_collection(
-        name=collection_name,
-        metadata={"hnsw:space": "cosine"},
-    )
-    collection.upsert(
-        ids=ids,
-        documents=texts,
-        metadatas=metadatas,
-        embeddings=cast(list[Embedding], embed_passages(texts)),
-    )
-    return len(texts)
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+    
+    docs_dir = Path("/app/data/documents")
+    if not docs_dir.exists():
+        docs_dir = Path("/app/data/nexatech_documents/documents")
+    if not docs_dir.exists():
+        docs_dir = PROJECT_ROOT / "data" / "nexatech_documents" / "documents"
+
+    if len(sys.argv) > 1:
+        docs_dir = Path(sys.argv[1])
+
+    print(f"Scanning directory: {docs_dir}")
+    if docs_dir.exists():
+        from backend.app.core.database import SessionLocal
+        with SessionLocal() as session:
+            total_chunks = ingest_documents(docs_dir, db=session)
+        print(f"SUCCESS: Ingested {total_chunks} chunks into Chroma collection '{COLLECTION_NAME}' at {DEFAULT_CHROMA_PATH}")
+    else:
+        print(f"ERROR: Documents directory not found at {docs_dir}")
