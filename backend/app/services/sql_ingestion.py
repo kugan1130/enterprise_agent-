@@ -79,9 +79,9 @@ def ingest_csv_to_sql(csv_path: Path, filename: str) -> str:
         # Drop table if exists to allow re-ingestion of the same table name
         session.execute(text(f"DROP TABLE IF EXISTS {table_name}"))
         
-        # Create table
+        # Create table with a unique primary key name to avoid conflicts with CSV columns named 'id'
         columns_def = ", ".join([f"{h} {t}" for h, t in zip(safe_headers, column_types)])
-        create_stmt = f"CREATE TABLE {table_name} (id SERIAL PRIMARY KEY, {columns_def})"
+        create_stmt = f"CREATE TABLE {table_name} (_record_id SERIAL PRIMARY KEY, {columns_def})"
         session.execute(text(create_stmt))
         
         # Insert data

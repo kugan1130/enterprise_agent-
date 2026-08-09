@@ -60,24 +60,11 @@ async def sql_node(state: GraphState, llm_client: LLMClient) -> dict[str, Any]:
                 "source": ""
             }
 
-    # 2. Low-code path: LangChain create_sql_agent tool (the project reference flow)
-    try:
-        from backend.app.tools.langchain_sql_agent import run_langchain_sql_agent
-
-        result = await run_langchain_sql_agent(user_message)
-        if result and result.get("success"):
-            print(f"[SQL TOOL] search_database tool called for q={user_message!r}: {json.dumps(result)[:400]}")
-            return {
-                "sql_result": json.dumps(result),
-                "tool_called": True,
-                "tool_success": True,
-                "source": "PostgreSQL"
-            }
-        print(f"[SQL TOOL] agent unavailable, using schema-aware fallback: {result}")
-    except Exception as agent_err:
-        print(f"[SQL TOOL] agent error ({agent_err}), using schema-aware fallback...")
-
-    # 3. Schema-aware fallback: LLM writes read-only SQL, executor queries PostgreSQL
+    # 2. Low-code path bypassed to avoid token-wasting ReAct loops.
+    # The LangChain SQL agent uses ReAct, which loops on `sql_db_list_tables` and hits 429s.
+    # Instead, we execute the exact flow requested: Get schema ONCE -> Generate SELECT -> Execute.
+    
+    # We fetch the schema once for this request.
     schema_info = get_database_schema()
 
     sql_prompt = (
@@ -104,7 +91,7 @@ async def sql_node(state: GraphState, llm_client: LLMClient) -> dict[str, Any]:
 
     # Guard against provider/service failure messages being mistaken for SQL
     lowered = clean_sql.lower()
-    if not clean_sql or lowered.startswith(("groq llm service notice", "groq service notice")):
+    if not clean_sql or lowered.startswith(("groq llm service notice", "groq service notice", "i'm sorry", "i am sorry")):
         print(f"[SQL TOOL] LLM service unavailable (no SQL generated): {clean_sql[:120]!r}")
         return {
             "sql_result": json.dumps(
@@ -121,10 +108,22 @@ async def sql_node(state: GraphState, llm_client: LLMClient) -> dict[str, Any]:
             "source": ""
         }
 
-    print(f"[SQL TOOL] fallback SQL for q={user_message!r}: {clean_sql!r}")
+    # REQUIRED DEBUG LOGGING for SQL
+    import logging
+    import re
+    logger = logging.getLogger("enterprise_ai.sql")
+    
+    # Extract tables used via regex (simple heuristic for logging)
+    tables_used = list(set(re.findall(r"(?:FROM|JOIN)\s+([a-zA-Z0-9_]+)", clean_sql, re.IGNORECASE)))
+    
+    logger.info(f"TABLES_USED:\n{tables_used}\n")
+    logger.info(f"GENERATED_SQL:\n{clean_sql}\n")
 
     result = execute_sql_query(clean_sql)
-    print(f"[SQL TOOL] executed result: {json.dumps(result)[:400]}")
+    
+    row_count = len(result.get("rows", [])) if result.get("success") else 0
+    logger.info(f"ROWS:\n{row_count}\n")
+    
     return {
         "sql_result": json.dumps(result),
         "tool_called": True,

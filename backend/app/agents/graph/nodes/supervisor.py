@@ -53,30 +53,67 @@ async def supervisor_node(state: GraphState, llm_client: LLMClient) -> dict[str,
     if any(kw in user_msg_lower for kw in WEB_EXPLICIT_KEYWORDS):
         return {"route": "web", "task_type": "web_research"}
 
-    # 4. Domain-based LLM Classification
-    # Do NOT use simplistic rules like "how many" -> SQL.
-    # The route must be based on source/domain, not generic words.
+    # 4. Check Registry for RAG / SQL availability
+    from backend.app.core.database import SessionLocal
+    from backend.app.models.user import DocumentRecord
+    
+    rag_available = False
+    sql_available = False
+    with SessionLocal() as db:
+        rag_available = db.query(DocumentRecord).filter(DocumentRecord.status == "indexed").first() is not None
+        sql_available = db.query(DocumentRecord).filter(DocumentRecord.sql_status == "indexed").first() is not None
+
+    import logging
+    logger = logging.getLogger("enterprise_ai.supervisor")
+    logger.info(f"QUESTION:\n{resolved_query}\n")
+    logger.info(f"RAG_AVAILABLE:\n{rag_available}\n")
+    logger.info(f"SQL_AVAILABLE:\n{sql_available}\n")
+    logger.info(f"WEB_REQUESTED:\nFalse\n") # Fast-path hit earlier if True
+
+    # 5. Domain-based LLM Classification
     prompt = (
         "You are the Supervisor Agent of an Enterprise AI Assistant. "
-        "Classify the request into the exact route based strictly on the source/domain:\n\n"
+        "Classify the request into the exact route based strictly on the source/domain.\n\n"
+        f"CONTEXT SIGNALS:\n"
+        f"- Indexed Documents Available (RAG): {rag_available}\n"
+        f"- Structured Database Available (SQL): {sql_available}\n\n"
+        "ROUTES:\n"
         "- 'planner': Use if ONE user query requires multiple agents/sources (e.g., 'Tell me our remote policy, calculate Q4 revenue, and search online for latest AI news.').\n"
-        "- 'rag': Use if the question concerns information contained in uploaded documents (e.g., policies, resumes, guides, roadmaps, reports, benefits, architecture documents, structured-data descriptions). Example: 'How many phases are in the Agentic AI Engineer roadmap?' MUST go to RAG, not SQL.\n"
-        "- 'sql': Use if the question asks for exact structured company/database information (e.g., sales, revenue, customers, products, quantities, orders, employees, database records).\n"
-        "- 'web': Use if requiring live current internet search (e.g. 'search online').\n"
+        "- 'rag': Use if the question concerns information likely contained in uploaded documents (e.g., policies, resumes, specific people, team members, guides, roadmaps, reports). Example: 'Who is Kanishka?' or 'Smart Crop Guardian project team members list' MUST go to RAG, not SQL.\n"
+        "- 'sql': Use ONLY if the question asks for exact structured company/database information (e.g., sales, revenue, customers, products, quantities, orders, aggregate employee stats). DO NOT use SQL just because the word 'list' or 'project' or 'company' is present.\n"
         "- 'direct': Use if the answer is clearly available from conversation memory, or for simple conversational filler.\n\n"
         "DISAMBIGUATION RULE FOR RAG vs SQL:\n"
+        f"If `Indexed Documents Available (RAG)` is True, strongly prefer 'rag' for questions about company, project, or personnel information unless it is explicitly about structured metrics like revenue/sales.\n"
         "Determine whether the user wants 'document meaning' (RAG) or an 'exact database value' (SQL). "
         "If ambiguous, use context to decide. Never blindly map 'how many' to SQL; consider the subject matter (e.g. roadmap phases = RAG, products sold = SQL).\n\n"
         f"Conversation History:\n{history}\n\n"
         f"User Request: {resolved_query}\n\n"
-        "Return ONLY valid JSON: {\"route\": \"<route_name>\"}"
+        "Return ONLY valid JSON containing 'route' and 'reason': {\"route\": \"<route_name>\", \"reason\": \"<explanation>\"}"
     )
 
     try:
         decision_text = await llm_client.generate(prompt)
-        cleaned_json = decision_text.replace("```json", "").replace("```", "").strip()
-        decision = RoutingDecision.model_validate_json(cleaned_json)
-        return {"route": decision.route, "task_type": task_type or "general_conversation", "current_query": resolved_query}
-    except Exception:
+        import re
+        # Find the first JSON-like object
+        match = re.search(r'\{.*\}', decision_text, re.DOTALL)
+        if match:
+            cleaned_json = match.group(0)
+        else:
+            cleaned_json = decision_text.replace("```json", "").replace("```", "").strip()
+        
+        # We parse manually to extract the reason
+        import json
+        decision_data = json.loads(cleaned_json)
+        route = decision_data.get("route", "direct")
+        reason = decision_data.get("reason", "No reason provided")
+        
+        logger.info(f"ROUTE:\n{route}\n")
+        logger.info(f"ROUTE_REASON:\n{reason}\n")
+        
+        return {"route": route, "task_type": task_type or "general_conversation", "current_query": resolved_query}
+    except Exception as e:
+        logger.error(f"Supervisor parsing error: {e}. Raw text: {decision_text}")
         # Fallback only when appropriate
+        logger.info(f"ROUTE:\ndirect\n")
+        logger.info(f"ROUTE_REASON:\nFallback due to error\n")
         return {"route": "direct", "task_type": "general_conversation", "current_query": resolved_query}

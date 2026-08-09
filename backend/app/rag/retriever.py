@@ -9,7 +9,7 @@ from backend.app.rag.embeddings import embed_query
 from backend.app.rag.ingest import COLLECTION_NAME, DEFAULT_CHROMA_PATH
 
 logger = logging.getLogger("enterprise_ai.rag_retriever")
-MAX_COSINE_DISTANCE = 0.45
+MAX_COSINE_DISTANCE = 0.70
 
 
 def retrieve_documents(

@@ -27,7 +27,7 @@ _sql_agent_instance = None
 class ReadOnlySQLDatabase(SQLDatabase):
     """SQLDatabase that routes every query through the validated read-only executor."""
 
-    def run(self, command: str, fetch: str = "all", include_columns: bool = False):
+    def run(self, command: str, fetch: str = "all", include_columns: bool = False, parameters: dict = None, **kwargs):
         validated = validate_read_only_sql(command)
         result = execute_sql_query(validated)
         if not result["success"]:

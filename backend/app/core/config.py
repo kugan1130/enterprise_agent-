@@ -11,7 +11,7 @@ BASE_DIR = Path(__file__).resolve().parents[2]
 
 class Settings(BaseSettings):
     APP_NAME: str = "Enterprise Multi-Agent AI Assistant"
-    MODEL_NAME: str = "llama-3.3-70b-versatile"
+    MODEL_NAME: str = "llama-3.1-8b-instant"
     GROQ_API_KEY: str = ""
     TAVILY_API_KEY: str = ""
     DATABASE_URL: str = "sqlite:///./enterprise_app.db"

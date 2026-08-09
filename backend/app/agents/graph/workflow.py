@@ -139,14 +139,40 @@ def create_workflow(llm_client: LLMClient):
                 f"User: {user_message}"
             )
 
+        # 1. Deterministic Greeting Bypass
+        greetings = {"hi", "hello", "hey", "good morning", "good afternoon", "good evening", "thanks", "thank you"}
+        import logging
+        logger = logging.getLogger("enterprise_ai.workflow")
+        logger.info(f"LLM_NODE CHECK: agent_results={agent_results}, user_message={repr(user_message)}")
+        if not agent_results and user_message.lower().strip() in greetings:
+            output_state: Dict[str, Any] = {
+                "draft_response": "Hello! How can I assist you today?",
+                "tool_called": False,
+                "tool_success": True,
+                "source": "deterministic"
+            }
+            return output_state
+
         response = await llm_client.generate(prompt)
+        error_msg = None
 
         # Guard against LLM provider/service failure messages leaking to the user
         lowered_response = response.lower().strip()
         if lowered_response.startswith(("groq llm service notice", "groq service notice")) or not response.strip():
+            import logging
+            logger = logging.getLogger("enterprise_ai.workflow")
+            logger.error("DIRECT LLM ERROR: %s", response)
+            error_msg = response
             response = "I'm sorry, the AI service is temporarily unavailable. Please try again in a few moments."
 
         output_state: Dict[str, Any] = {"draft_response": response}
+        if error_msg:
+            output_state["error"] = error_msg
+            output_state["tool_success"] = False
+        elif not agent_results:
+            output_state["tool_called"] = True
+            output_state["tool_success"] = True
+            output_state["source"] = "Groq"
 
         # Auto-promote substantial Q&A / RAG answer into active session artifact
         tool_called = any(r.get("tool_called") for r in agent_results) if agent_results else False

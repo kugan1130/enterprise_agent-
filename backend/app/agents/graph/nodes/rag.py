@@ -67,6 +67,13 @@ async def rag_node(state: GraphState) -> dict[str, str]:
             "source": ""
         }
 
+    # REQUIRED DEBUG LOGGING for RAG
+    import logging
+    logger = logging.getLogger("enterprise_ai.rag")
+    logger.info(f"CHROMA_COLLECTION:\nenterprise_documents\n")
+    logger.info(f"RETRIEVED_CHUNKS:\n{len(formatted_chunks)}\n")
+    logger.info(f"SOURCES:\n{list(sources)}\n")
+
     return {
         "rag_context": "\n\n".join(formatted_chunks),
         "tool_called": True,

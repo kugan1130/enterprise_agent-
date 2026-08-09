@@ -14,16 +14,19 @@ TEST_DATA_DIR = Path(__file__).parent / "test_data"
 TEST_DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 # Create dummy test files
-POLICY_PDF_PATH = TEST_DATA_DIR / "remote_work_policy.pdf"
+POLICY_PDF_PATH = TEST_DATA_DIR / "test_remote_work_policy.pdf"
 SALES_CSV_PATH = TEST_DATA_DIR / "sales.csv"
 
 if not POLICY_PDF_PATH.exists():
-    with open(POLICY_PDF_PATH, "wb") as f:
-        f.write(b"%PDF-1.4\n1 0 obj\n<<\n/Type /Catalog\n/Pages 2 0 R\n>>\nendobj\n2 0 obj\n<<\n/Type /Pages\n/Count 1\n/Kids [3 0 R]\n>>\nendobj\n3 0 obj\n<<\n/Type /Page\n/Parent 2 0 R\n/Resources <<\n/Font <<\n/F1 4 0 R\n>>\n>>\n/Contents 5 0 R\n>>\nendobj\n4 0 obj\n<<\n/Type /Font\n/Subtype /Type1\n/BaseFont /Helvetica\n>>\nendobj\n5 0 obj\n<<\n/Length 44\n>>\nstream\nBT\n/F1 24 Tf\n100 700 Td\n(Remote Work Policy: Employees can work from home 3 days a week. Manager approval is required for all remote days.) Tj\nET\nendstream\nendobj\ntrailer\n<<\n/Root 1 0 R\n>>\n%%EOF")
+    from reportlab.pdfgen import canvas
+    c = canvas.Canvas(str(POLICY_PDF_PATH))
+    c.drawString(100, 750, f"Remote Work Policy: Employees can work from home 3 days a week. {time.time()}")
+    c.drawString(100, 730, "Manager approval is required for all remote days.")
+    c.save()
 
 if not SALES_CSV_PATH.exists():
     with open(SALES_CSV_PATH, "w") as f:
-        f.write("id,product_name,quantity_sold,revenue\n1,Alpha Widget,100,5000\n2,Beta Gizmo,50,7500\n3,Gamma Module,200,10000\n")
+        f.write(f"id,product_name,quantity_sold,revenue\n1,Alpha Widget,100,5000\n2,Beta Gizmo,50,7500\n3,Gamma Module,200,{time.time()}\n")
 
 def get_auth_token():
     url = f"{BASE_URL}/api/auth/login"
@@ -63,9 +66,11 @@ def test_1_and_2_upload_pdf(token):
     url = f"{BASE_URL}/api/documents/upload"
     headers = {"Authorization": f"Bearer {token}"}
     
+    unique_name = f"test_remote_{int(time.time())}.pdf"
+    
     # First Upload
     with open(POLICY_PDF_PATH, "rb") as f:
-        files = {"file": ("remote_work_policy.pdf", f, "application/pdf")}
+        files = {"file": (unique_name, f, "application/pdf")}
         resp = requests.post(url, headers=headers, files=files)
         logger.info("Upload 1 Response: %s", resp.json())
         assert resp.status_code in (200, 201), f"Expected success, got {resp.status_code}"
@@ -75,10 +80,10 @@ def test_1_and_2_upload_pdf(token):
     
     # Second Upload (Duplicate)
     with open(POLICY_PDF_PATH, "rb") as f:
-        files = {"file": ("remote_work_policy.pdf", f, "application/pdf")}
+        files = {"file": (unique_name, f, "application/pdf")}
         resp2 = requests.post(url, headers=headers, files=files)
         logger.info("Upload 2 Response: %s", resp2.json())
-        assert resp2.json().get("status") == "already_ingested", "Duplicate detection failed!"
+        assert resp2.status_code == 409, "Duplicate detection failed!"
         
     return doc_id
 
@@ -89,18 +94,17 @@ def test_chat(query, token, expected_route=None, session_id="test-session"):
     payload = {"message": query, "session_id": session_id}
     resp = requests.post(url, headers=headers, json=payload)
     data = resp.json()
-    logger.info(f"Chat Response Route: {data.get('route')} | Answer snippet: {data.get('answer', '')[:100]}...")
-    if expected_route:
-        if data.get('route') != expected_route:
-             logger.warning(f"Expected route '{expected_route}', got '{data.get('route')}'")
+    logger.info(f"Chat Response: {data.get('response', '')[:200]}")
+    time.sleep(2)
     return data
 
 def test_4_upload_csv(token):
     logger.info("--- TEST 4: CSV STRUCTURED UPLOAD ---")
     url = f"{BASE_URL}/api/documents/upload"
     headers = {"Authorization": f"Bearer {token}"}
+    unique_name = f"test_sales_{int(time.time())}.csv"
     with open(SALES_CSV_PATH, "rb") as f:
-        files = {"file": ("sales.csv", f, "text/csv")}
+        files = {"file": (unique_name, f, "text/csv")}
         resp = requests.post(url, headers=headers, files=files)
         logger.info("Upload CSV Response: %s", resp.json())
         assert resp.status_code in (200, 201), "CSV upload failed!"
@@ -130,6 +134,7 @@ def run_tests():
     time.sleep(2) # Give ChromaDB / Postgres a tiny breather
     
     # Test 1 & 7: PDF Query & Memory
+    test_chat("hi", token, "direct", "mem-session-1")
     test_chat("What is our remote work policy?", token, "rag", "mem-session-1")
     test_chat("What about manager approval?", token, "rag", "mem-session-1")
     

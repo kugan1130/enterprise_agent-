@@ -140,6 +140,9 @@ async def upload_document(
             existing.sql_status = "indexed"
         except Exception as err:
             sql_error = str(err)
+            import traceback
+            import logging
+            logging.getLogger("enterprise_ai").error(f"SQL Ingestion Error: {err}\n{traceback.format_exc()}")
             existing.sql_status = "failed"
             
     # Finalize status based on dual pipelines
@@ -164,7 +167,7 @@ async def upload_document(
         "filename": file.filename,
         "chunks_ingested": chunk_count,
         "status": "already_ingested" if skipped_rag else "ingested",
-        "message": f"{file.filename} is ready. RAG: {'Failed' if rag_error else 'OK'}, SQL: {'Failed' if sql_error else 'OK' if is_structured else 'N/A'}",
+        "message": f"{file.filename} is ready. RAG: {'Failed' if rag_error else 'OK'}, SQL: {'Failed ('+sql_error+')' if sql_error else 'OK' if is_structured else 'N/A'}",
     }
 
 
