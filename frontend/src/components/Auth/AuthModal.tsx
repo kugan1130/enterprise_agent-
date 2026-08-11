@@ -61,12 +61,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onAuthSuccess }) => {
 
     setLoading(true);
     try {
-      await authService.register(username.trim(), email.trim(), password.trim());
-      setSuccessMsg("Account created successfully! Redirecting to sign in...");
-      setTimeout(() => {
-        setSuccessMsg(null);
-        setActiveTab("login");
-      }, 1500);
+      const authRes = await authService.register(username.trim(), email.trim(), password.trim());
+      onAuthSuccess(authRes.user);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Registration failed.");
     } finally {

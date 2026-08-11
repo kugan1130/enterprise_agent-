@@ -1,5 +1,5 @@
 import { ArtifactRecord, ChatStreamEvent, DocumentRecord, UploadResponse } from "../types";
-import { getApiBaseUrl, getStoredToken } from "./authService";
+import { clearAuthData, getApiBaseUrl, getStoredToken } from "./authService";
 
 export const uploadPDF = async (file: File): Promise<UploadResponse> => {
   if (!file || file.type !== "application/pdf") {
@@ -35,6 +35,10 @@ export const fetchDocuments = async (): Promise<DocumentRecord[]> => {
     headers: { Authorization: `Bearer ${token}` },
   });
 
+  if (res.status === 401) {
+    clearAuthData();
+    throw new Error("Session expired. Please sign in again.");
+  }
   if (!res.ok) return [];
   const data = await res.json();
   return data as DocumentRecord[];

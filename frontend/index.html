@@ -165,6 +165,21 @@
             }, [token]);
 
             useEffect(() => {
+                const validateSession = async () => {
+                    if (!token) return;
+                    try {
+                        const res = await fetch(`${API_BASE_URL}/api/auth/me`, {
+                            headers: { Authorization: `Bearer ${token}` }
+                        });
+                        if (!res.ok) handleLogout();
+                    } catch (e) {
+                        handleLogout();
+                    }
+                };
+                validateSession();
+            }, []);
+
+            useEffect(() => {
                 if (chatCanvasRef.current) {
                     chatCanvasRef.current.scrollTop = chatCanvasRef.current.scrollHeight;
                 }
@@ -175,6 +190,10 @@
                     const res = await fetch(`${API_BASE_URL}/api/documents`, {
                         headers: { Authorization: `Bearer ${token}` }
                     });
+                    if (res.status === 401) {
+                        handleLogout();
+                        return;
+                    }
                     if (res.ok) setDocuments(await res.json());
                 } catch (e) {}
             };
@@ -214,11 +233,10 @@
                     });
                     const data = await res.json();
                     if (!res.ok) throw new Error(data.error?.message || data.detail || "Registration failed.");
-                    setSuccessMsg("Account created successfully! Redirecting to sign in...");
-                    setTimeout(() => {
-                        setSuccessMsg(null);
-                        setActiveTab("login");
-                    }, 1500);
+                    setToken(data.access_token);
+                    setUser(data.user);
+                    localStorage.setItem("nexa_token", data.access_token);
+                    localStorage.setItem("nexa_user", JSON.stringify(data.user));
                 } catch (err) {
                     setError(err.message);
                 } finally {
@@ -231,6 +249,8 @@
                 localStorage.removeItem("nexa_user");
                 setToken("");
                 setUser(null);
+                setDocuments([]);
+                setMessages([]);
             };
 
             const handleUploadPDF = async (file) => {

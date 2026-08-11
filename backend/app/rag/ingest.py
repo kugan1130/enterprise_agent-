@@ -71,6 +71,7 @@ def ingest_document_rag(
     safe_filename: str,
     uploaded_by: str,
     source_path: str,
+    user_id: Any = None,
     persist_path: Path = DEFAULT_CHROMA_PATH,
     collection_name: str = COLLECTION_NAME,
 ) -> IngestionResult:
@@ -78,8 +79,15 @@ def ingest_document_rag(
     content_hash = hashlib.sha256(file_path.read_bytes()).hexdigest()
     document_id = f"doc_{content_hash[:40]}"
     
-    # Note: DocumentRecord is now created/committed by the upload controller *before* ingestion starts.
-    existing = db.query(DocumentRecord).filter(DocumentRecord.document_id == document_id).first()
+    # Check by content_hash or document_id
+    existing = db.query(DocumentRecord).filter(
+        (DocumentRecord.content_hash == content_hash) | (DocumentRecord.document_id == document_id)
+    ).first()
+
+    if existing and (existing.status == "indexed" or existing.rag_status == "indexed") and (existing.chunk_count or 0) > 0:
+        logger.info("Document %s (%s) already indexed with %d chunks. Skipping.", filename, content_hash[:8], existing.chunk_count)
+        return IngestionResult(document_id=existing.document_id, chunk_count=existing.chunk_count or 0, skipped=True)
+
     if not existing:
         existing = DocumentRecord(
             document_id=document_id,
@@ -87,6 +95,7 @@ def ingest_document_rag(
             safe_filename=safe_filename,
             file_size=file_path.stat().st_size,
             uploaded_by=uploaded_by,
+            user_id=int(user_id) if user_id is not None else None,
             upload_timestamp=datetime.utcnow(),
             source_path=source_path,
             content_hash=content_hash,
@@ -95,7 +104,11 @@ def ingest_document_rag(
         )
         db.add(existing)
         db.commit()
-    
+    else:
+        if user_id is not None and not existing.user_id:
+            existing.user_id = int(user_id)
+            db.commit()
+
     try:
         from backend.app.core.chroma import get_chroma_service
         chroma_service = get_chroma_service(persist_path)
@@ -155,13 +168,16 @@ def ingest_document_rag(
             raise ValueError(f"No extractable text found in {file_path.name}.")
 
         chunks = RecursiveCharacterTextSplitter(
-            chunk_size=800,
-            chunk_overlap=120,
+            chunk_size=1000,
+            chunk_overlap=200,
+            separators=["\n\n", "\n", ". ", " ", ""],
         ).split_documents(documents)
 
         texts: List[str] = []
         ids: List[str] = []
         metadatas: List[Metadata] = []
+
+        uid_val = int(user_id) if user_id is not None else 0
 
         for idx, chunk in enumerate(chunks):
             content = chunk.page_content.strip()
@@ -178,6 +194,7 @@ def ingest_document_rag(
                     "source_path": source_path,
                     "content_hash": content_hash,
                     "uploaded_by": uploaded_by,
+                    "user_id": uid_val,
                     "chunk_id": chunk_id,
                     "chunk_index": idx,
                     "page": chunk.metadata.get("page", 0),
@@ -212,18 +229,6 @@ def ingest_document_rag(
         existing.rag_status = "indexed"
         existing.chunk_count = len(texts)
         db.commit()
-        
-        # Diagnostic logging
-        logger.info("=== INGESTION DIAGNOSTIC LOG ===")
-        logger.info(f"Document ID: {document_id}")
-        logger.info(f"Filename: {filename}")
-        logger.info(f"File Hash: {content_hash}")
-        logger.info(f"Chunk Count: {len(texts)}")
-        logger.info("Embedding Model: intfloat/multilingual-e5-large")
-        logger.info("Embedding Dimension: 1024")
-        logger.info(f"Chroma Path: {persist_path}")
-        logger.info(f"Collection Name: {collection_name}")
-        logger.info("================================")
         
         return IngestionResult(document_id=document_id, chunk_count=len(texts), skipped=False)
         
@@ -263,25 +268,3 @@ def ingest_documents(documents_path: Path, *, db: Any = None, persist_path: Path
         )
         total_chunks += result.chunk_count
     return total_chunks
-
-
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-    
-    docs_dir = Path("/app/data/documents")
-    if not docs_dir.exists():
-        docs_dir = Path("/app/data/nexatech_documents/documents")
-    if not docs_dir.exists():
-        docs_dir = PROJECT_ROOT / "data" / "nexatech_documents" / "documents"
-
-    if len(sys.argv) > 1:
-        docs_dir = Path(sys.argv[1])
-
-    print(f"Scanning directory: {docs_dir}")
-    if docs_dir.exists():
-        from backend.app.core.database import SessionLocal
-        with SessionLocal() as session:
-            total_chunks = ingest_documents(docs_dir, db=session)
-        print(f"SUCCESS: Ingested {total_chunks} chunks into Chroma collection '{COLLECTION_NAME}' at {DEFAULT_CHROMA_PATH}")
-    else:
-        print(f"ERROR: Documents directory not found at {docs_dir}")

@@ -35,6 +35,33 @@ export const clearAuthData = (): void => {
   localStorage.removeItem(USER_KEY);
 };
 
+export const hasStoredAuth = (): boolean => {
+  return Boolean(getStoredToken() && getStoredUser());
+};
+
+export const validateSession = async (): Promise<User | null> => {
+  const token = getStoredToken();
+  const user = getStoredUser();
+  if (!token || !user) {
+    clearAuthData();
+    return null;
+  }
+
+  const baseUrl = getApiBaseUrl();
+  const res = await fetch(`${baseUrl}/api/auth/me`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  if (!res.ok) {
+    clearAuthData();
+    return null;
+  }
+
+  const profile = (await res.json()) as User;
+  saveAuthData(token, profile);
+  return profile;
+};
+
 export const authService = {
   login: async (username: string, password: string): Promise<AuthResponse> => {
     const baseUrl = getApiBaseUrl();

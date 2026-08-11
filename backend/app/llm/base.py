@@ -6,7 +6,7 @@ class BaseLLM(ABC):
     """Abstract interface for all LLM providers."""
 
     @abstractmethod
-    async def generate(self, prompt: str) -> str:
+    async def generate(self, prompt: str, system_prompt: str = "") -> str:
         """Generate a complete response."""
         raise NotImplementedError
 

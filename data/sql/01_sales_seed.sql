@@ -59,4 +59,6 @@ VALUES
     ('TXN-2026-032', '2026-06-11', 'NovaCloud Enterprise', 'Cloud Infrastructure', 'LATAM', 'Pinnacle Systems', 5, 12000.00, 60000.00, 'Pending'),
     ('TXN-2026-033', '2026-06-18', 'NovaCloud Enterprise', 'Cloud Infrastructure', 'LATAM', 'Echo Energy Corp', 10, 12000.00, 120000.00, 'Completed'),
     ('TXN-2026-034', '2026-06-22', 'NovaSync Hub', 'Integration & Middleware', 'EMEA', 'Starlight Media Group', 10, 3200.00, 32000.00, 'Completed'),
-    ('TXN-2026-035', '2026-06-28', 'NovaSync Hub', 'Integration & Middleware', 'EMEA', 'OmniCorp International', 2, 3200.00, 6400.00, 'Pending');
+    ('TXN-2026-035', '2026-06-28', 'NovaSync Hub', 'Integration & Middleware', 'EMEA', 'OmniCorp International', 2, 3200.00, 6400.00, 'Pending'),
+    ('TXN-2026-036', '2026-01-10', 'NovaCloud Enterprise', 'Cloud Infrastructure', 'North America', 'Vortex Dynamics', 7, 12000.00, 84000.00, 'Completed');
+

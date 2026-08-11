@@ -17,14 +17,19 @@ class GroqProvider(BaseLLM):
         else:
             self.client = None
 
-    async def generate(self, prompt: str) -> str:
+    async def generate(self, prompt: str, system_prompt: str = "") -> str:
         if not self.client:
             return "Groq Service Notice: GROQ_API_KEY is not configured in environment."
+
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
 
         try:
             response = await self.client.chat.completions.create(
                 model=settings.MODEL_NAME,
-                messages=[{"role": "user", "content": prompt}],
+                messages=messages,
                 timeout=10.0,
                 temperature=0.0,
             )

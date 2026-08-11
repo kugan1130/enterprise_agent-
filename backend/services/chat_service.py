@@ -3,78 +3,56 @@
 import json
 import time
 import uuid
-from typing import Any, AsyncGenerator, Dict
+from typing import Any, AsyncGenerator, Dict, Optional
 
 from backend.app.agents.graph.workflow import create_workflow
-from backend.app.core.memory import (
-    add_conversation_turn,
-    format_history_as_text,
-    get_conversation_history,
-)
-from backend.app.llm.llm_client import LLMClient
-from backend.app.services.artifact_service import (
-    get_active_artifact,
-    save_session_artifact,
-)
+from backend.app.services.artifact_service import get_active_artifact, save_session_artifact
 
 
 class ChatService:
     """
-    Handles chat business logic, memory persistence, artifact tracking, and agent workflow execution.
+    Handles chat business logic, session orchestration, SSE event streaming, and artifact persistence.
     """
 
-    def __init__(self, llm: LLMClient) -> None:
-        self._llm = llm
-        self._workflow = create_workflow(llm)
+    def __init__(self, llm_client: Optional[Any] = None) -> None:
+        self._workflow = create_workflow()
 
-    async def ask(self, prompt: str, session_id: str = "default_session") -> str:
+    async def ask(self, prompt: str, session_id: str = "default_session", user_id: Optional[int] = None) -> str:
         """
-        Send a user prompt through the multi-agent workflow and return final answer.
+        Send a user prompt through the minimal LangGraph workflow and return final answer.
         """
-        history = get_conversation_history(session_id)
-        history_text = format_history_as_text(history)
-        active_art = get_active_artifact(session_id)
-
         result = await self._workflow.ainvoke(
             {
-                "user_message": prompt,
+                "current_query": prompt,
                 "session_id": session_id,
-                "history": history_text,
-                "artifact": active_art,
+                "user_id": user_id,
             }
         )
 
-        if "artifact" in result and result["artifact"]:
-            save_session_artifact(session_id, result["artifact"])
+        artifact = result.get("artifact")
+        if artifact:
+            save_session_artifact(session_id, artifact)
 
         response = result.get("final_response", "")
-        add_conversation_turn(session_id, prompt, response)
         return response
 
     async def ask_stream(
-        self, prompt: str, session_id: str = "default_session"
+        self, prompt: str, session_id: str = "default_session", user_id: Optional[int] = None
     ) -> AsyncGenerator[str, None]:
         """
         Processes a prompt and streams structured progress events and response tokens via SSE format.
         Includes request_id for concurrent stream tracking.
         """
         request_id = f"req_{int(time.time()*1000)}_{uuid.uuid4().hex[:6]}"
-        history = get_conversation_history(session_id)
-        history_text = format_history_as_text(history)
-        active_art = get_active_artifact(session_id)
 
-        # 1. Activity Event: Guardrail evaluation
-        yield f"data: {json.dumps({'request_id': request_id, 'type': 'activity', 'event': 'status', 'message': 'Evaluating request guardrails...'})}\n\n"
-
-        # 2. Activity Event: Context & Routing evaluation
-        yield f"data: {json.dumps({'request_id': request_id, 'type': 'activity', 'event': 'status', 'message': 'Evaluating context & routing supervisor...'})}\n\n"
+        # 1. Activity Event: Supervisor evaluation
+        yield f"data: {json.dumps({'request_id': request_id, 'type': 'activity', 'event': 'status', 'message': 'Evaluating request routing supervisor...'})}\n\n"
 
         result = await self._workflow.ainvoke(
             {
-                "user_message": prompt,
+                "current_query": prompt,
                 "session_id": session_id,
-                "history": history_text,
-                "artifact": active_art,
+                "user_id": user_id,
             }
         )
 
@@ -83,14 +61,15 @@ class ChatService:
             save_session_artifact(session_id, artifact)
             yield f"data: {json.dumps({'request_id': request_id, 'type': 'artifact', 'event': 'artifact', 'artifact': artifact})}\n\n"
 
-        route = result.get("route", "direct")
-        yield f"data: {json.dumps({'request_id': request_id, 'type': 'route', 'event': 'route_selected', 'route': route})}\n\n"
+        routes = result.get("routes", ["conversation"])
+        primary_route = routes[0] if routes else "conversation"
+        yield f"data: {json.dumps({'request_id': request_id, 'type': 'route', 'event': 'route_selected', 'route': primary_route, 'routes': routes})}\n\n"
 
-        yield f"data: {json.dumps({'request_id': request_id, 'type': 'activity', 'event': 'status', 'message': f'Executed agent pipeline: {route.upper()}'})}\n\n"
+        yield f"data: {json.dumps({'request_id': request_id, 'type': 'activity', 'event': 'status', 'message': f'Executed pipeline: {str(routes).upper()}'})}\n\n"
 
         response = result.get("final_response", "")
 
-        # Stream response tokens in small chunks
+        # Stream response tokens in small chunks for smooth UI output
         chunk_size = 12
         for i in range(0, len(response), chunk_size):
             chunk = response[i : i + chunk_size]
@@ -99,7 +78,4 @@ class ChatService:
         yield f"data: {json.dumps({'request_id': request_id, 'type': 'activity', 'event': 'status', 'message': 'Execution completed.'})}\n\n"
 
         # Final Event
-        yield f"data: {json.dumps({'request_id': request_id, 'type': 'final', 'event': 'completed', 'content': response, 'response': response, 'route': route})}\n\n"
-
-        # Record conversation turn in short-term memory (EXCLUDING internal events)
-        add_conversation_turn(session_id, prompt, response)
+        yield f"data: {json.dumps({'request_id': request_id, 'type': 'final', 'event': 'completed', 'content': response, 'response': response, 'route': primary_route})}\n\n"

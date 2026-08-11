@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { ArtifactRecord, ChatMessage, DocumentRecord, User } from "./types";
-import { getStoredUser, authService } from "./services/authService";
+import { authService, getStoredUser, hasStoredAuth, validateSession } from "./services/authService";
 import { fetchDocuments, streamChat } from "./services/api";
 import { AuthModal } from "./components/Auth/AuthModal";
 import { Sidebar } from "./components/Sidebar/Sidebar";
@@ -9,21 +9,52 @@ import { ChatInput } from "./components/Chat/ChatInput";
 import { ActivityPanel } from "./components/Chat/ActivityPanel";
 
 export const App = () => {
-  const [user, setUser] = useState<User | null>(getStoredUser());
-  const [sessionId, setSessionId] = useState<string>(
-    () => "session_" + Math.floor(Math.random() * 1000000)
-  );
+  const [user, setUser] = useState<User | null>(() => (hasStoredAuth() ? getStoredUser() : null));
+  const [sessionId, setSessionId] = useState<string>(() => {
+    const stored = localStorage.getItem("nexa_session_id");
+    if (stored) return stored;
+    const newId = "session_" + Math.floor(Math.random() * 1000000);
+    localStorage.setItem("nexa_session_id", newId);
+    return newId;
+  });
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [documents, setDocuments] = useState<DocumentRecord[]>([]);
   const [activitySteps, setActivitySteps] = useState<string[]>([]);
   const [isSending, setIsSending] = useState(false);
 
   const loadDocs = async () => {
-    if (user) {
+    if (!user) return;
+    try {
       const docs = await fetchDocuments();
       setDocuments(docs);
+    } catch (err) {
+      if (err instanceof Error && err.message.includes("sign in again")) {
+        setUser(null);
+        setDocuments([]);
+      }
     }
   };
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const restoreSession = async () => {
+      if (!hasStoredAuth()) {
+        setUser(null);
+        return;
+      }
+
+      const profile = await validateSession();
+      if (!cancelled) {
+        setUser(profile);
+      }
+    };
+
+    restoreSession();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (user) {
@@ -37,6 +68,7 @@ export const App = () => {
 
   const handleLogout = () => {
     authService.logout();
+    localStorage.removeItem("nexa_session_id");
     setUser(null);
     setMessages([]);
     setDocuments([]);
@@ -44,6 +76,7 @@ export const App = () => {
 
   const handleNewSession = () => {
     const newId = "session_" + Math.floor(Math.random() * 1000000);
+    localStorage.setItem("nexa_session_id", newId);
     setSessionId(newId);
     setMessages([]);
     setActivitySteps([]);

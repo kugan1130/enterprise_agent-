@@ -18,14 +18,29 @@ def hash_password(password: str) -> str:
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Verifies a plain text password against a stored PBKDF2 hash."""
+    """Verifies a plain text password against a stored PBKDF2 hash.
+
+    Supports two formats:
+    - Current:  ``salt$hex_hash``  (salt is first 16 chars of SHA256 of password+secret)
+    - Legacy:   base64-encoded PBKDF2 with fixed salt ``enterprise_ai_salt_2026``
+                (produced by the previous version of hash_password before commit cc3efa4)
+    """
     try:
         parts = hashed_password.split("$")
-        if len(parts) != 2:
-            return False
-        salt, stored_hash = parts
-        computed_hash = hashlib.pbkdf2_hmac("sha256", plain_password.encode("utf-8"), salt.encode("utf-8"), 100_000).hex()
-        return hmac.compare_digest(stored_hash, computed_hash)
+        if len(parts) == 2:
+            # Current format: salt$hex_hash
+            salt, stored_hash = parts
+            computed_hash = hashlib.pbkdf2_hmac(
+                "sha256", plain_password.encode("utf-8"), salt.encode("utf-8"), 100_000
+            ).hex()
+            return hmac.compare_digest(stored_hash, computed_hash)
+
+        # Legacy format: plain base64-encoded PBKDF2 with fixed salt
+        _LEGACY_SALT = b"enterprise_ai_salt_2026"
+        legacy_hash = base64.b64encode(
+            hashlib.pbkdf2_hmac("sha256", plain_password.encode("utf-8"), _LEGACY_SALT, 100_000)
+        ).decode("utf-8")
+        return hmac.compare_digest(legacy_hash, hashed_password)
     except Exception:
         return False
 

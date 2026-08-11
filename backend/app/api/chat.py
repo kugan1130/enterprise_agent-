@@ -1,8 +1,10 @@
-from typing import Annotated
+from typing import Annotated, Optional
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from backend.app.api.auth import get_current_user
+from backend.app.models.user import User
 from backend.services.chat_service import ChatService
 
 router = APIRouter(prefix="/api", tags=["chat"])
@@ -31,20 +33,22 @@ def get_chat_service(request: Request) -> ChatService:
 @router.post("/chat", response_model=ChatResponse)
 async def chat(
     payload: ChatRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
     chat_service: Annotated[ChatService, Depends(get_chat_service)],
 ) -> ChatResponse:
-    """Non-streaming chat response endpoint."""
-    response = await chat_service.ask(payload.message, payload.session_id)
+    """Non-streaming chat response endpoint protected by JWT."""
+    response = await chat_service.ask(payload.message, payload.session_id, user_id=current_user.id)
     return ChatResponse(response=response)
 
 
 @router.post("/chat/stream")
 async def chat_stream(
     payload: ChatRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
     chat_service: Annotated[ChatService, Depends(get_chat_service)],
 ):
-    """Event-driven Server-Sent Events (SSE) streaming chat endpoint."""
+    """Event-driven Server-Sent Events (SSE) streaming chat endpoint protected by JWT."""
     return StreamingResponse(
-        chat_service.ask_stream(payload.message, payload.session_id),
+        chat_service.ask_stream(payload.message, payload.session_id, user_id=current_user.id),
         media_type="text/event-stream",
     )

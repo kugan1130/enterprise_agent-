@@ -2,6 +2,7 @@
 
 import json
 from typing import Any, Dict, List
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 
 from backend.app.core.redis import get_redis_client
 
@@ -9,8 +10,10 @@ from backend.app.core.redis import get_redis_client
 _in_memory_store: Dict[str, List[Dict[str, str]]] = {}
 
 INTERNAL_STATUS_PATTERNS = [
-    "assistant is thinking", "ok stop", "evaluating request", "evaluating context",
-    "execution completed", "data:", "event:", "status", "route_selected", "guardrail notice"
+    "evaluating request routing supervisor",
+    "executed pipeline:",
+    "execution completed.",
+    "guardrail notice",
 ]
 
 
@@ -18,9 +21,12 @@ def _is_internal_control_message(text: str) -> bool:
     """Detects whether text is an internal UI activity, control message, or SSE event."""
     if text is None or not isinstance(text, str):
         return True
-    if not text.strip():
+    trimmed = text.strip()
+    if not trimmed:
         return False
-    t_lower = text.lower().strip()
+    if trimmed.startswith("data: {") or trimmed.startswith("event: "):
+        return True
+    t_lower = trimmed.lower()
     return any(pattern in t_lower for pattern in INTERNAL_STATUS_PATTERNS)
 
 
@@ -73,16 +79,41 @@ def add_conversation_turn(session_id: str, prompt: str, response: str) -> None:
     _in_memory_store[session_id].append(turn)
 
 
-def format_history_as_text(history: List[Dict[str, str]]) -> str:
+def format_history_as_text(history: List[Dict[str, str]], max_turns: int = 12) -> str:
     """Formats clean conversation turns as plain text context string for LLM prompts."""
     if not history:
         return ""
 
     formatted_turns = []
-    for turn in history[-5:]:  # Keep last 5 clean turns for prompt context window
+    for turn in history[-max_turns:]:
         user_msg = turn.get("user", "").strip()
         asst_msg = turn.get("assistant", "").strip()
         if user_msg and asst_msg:
             formatted_turns.append(f"User: {user_msg}\nAssistant: {asst_msg}")
 
     return "\n\n".join(formatted_turns)
+
+
+def get_conversation_messages(session_id: str, max_turns: int = 10) -> List[BaseMessage]:
+    """Retrieves conversation history as native LangChain BaseMessage primitives."""
+    turns = get_conversation_history(session_id)
+    messages: List[BaseMessage] = []
+    for turn in turns[-max_turns:]:
+        user_text = turn.get("user", "").strip()
+        asst_text = turn.get("assistant", "").strip()
+        if user_text:
+            messages.append(HumanMessage(content=user_text))
+        if asst_text:
+            messages.append(AIMessage(content=asst_text))
+    return messages
+
+
+def build_focused_context(
+    session_id: str,
+    current_message: str,
+    max_turns: int = 12,
+) -> str:
+    """Builds a focused context string for the LLM containing recent conversation."""
+    history = get_conversation_history(session_id)
+    history_text = format_history_as_text(history, max_turns=max_turns)
+    return history_text
